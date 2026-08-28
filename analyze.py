@@ -28,7 +28,7 @@ from functions import density, formula
 
 LEAD_COLS = ['Code', 'CacheGeneratedAt']
 
-def song_row(entry, gen_on):
+def song_row(entry, gen_on, diff_type=None):
     metrics = density.calc_metrics(entry['notes'])
     if metrics is None:
         return None
@@ -36,8 +36,10 @@ def song_row(entry, gen_on):
     difficulty = formula.calc_diff(metrics)
 
     ini_path = pathlib.Path(f"{entry["song_path"]}/song.ini")
-    
-    ini_updater.update_ini_value(ini_path, "diff_guitar", difficulty["CalcTier"])
+
+    if diff_type is not None:
+        if diff_type == "CalcTier" or diff_type == "RemapDiff":
+            ini_updater.update_ini_value(ini_path, "diff_guitar", difficulty[diff_type])
 
     return {
         'Code': entry['code'],
@@ -48,7 +50,7 @@ def song_row(entry, gen_on):
     }
 
 # run the analysis - loading from selected/default cache
-def analyze(cache=None, cache_path=None, header=None, out_dir=None):
+def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_type=None):
     header = header or config.HEADER
 
     if cache is None:
@@ -62,7 +64,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None):
     skipped = 0
 
     for entry in tqdm.tqdm(cache['songs'].values(), desc="Computing metrics", unit="song"):
-        row = song_row(entry, gen_on)
+        row = song_row(entry, gen_on, diff_type)
         if row is None:
             skipped += 1
             continue
@@ -92,10 +94,10 @@ def main():
     parser = argparse.ArgumentParser(description="Compute metrics from a note stream cache.")
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")
-    parser.add_argument('--modify_game', action="store_true", help="Modify the in-game intensities for ease of use")
+    parser.add_argument('--modify_game', default=None, help="Choose which type of calc you'd like to use for in-game.")
     args = parser.parse_args()
 
-    analyze(cache_path=args.cache, header=args.header)
+    analyze(cache_path=args.cache, header=args.header, diff_type=args.modify_game)
 
 
 if __name__ == '__main__':
