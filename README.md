@@ -94,6 +94,8 @@ A CSV named `{header}_metrics_{timestamp}.csv`, containing a row per song includ
 - `--cache`: point at a specific cache file, instead of most recent for the header
 - `--modify_game`: Will take in either `CalcTier` or `RemapDiff`. If either are supplied will update values in-game with the calculation of choice. if nothing is supplied, will not update values.
 
+**Note: When modifying values in game, you MUST SCAN SONGS for the new metadata to work.**
+
 ---
 
 ## 4. The Difficulty Formula
