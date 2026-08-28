@@ -14,7 +14,7 @@ timestamp of generation
 song.ini metadata (name/artist/charter/difficulty/release) 
 forumla difficulty metrics (duration, NPS/VPS metrics, D, remapped & calculated tier)
 """
-
+import configparser
 import argparse
 import pathlib
 
@@ -22,6 +22,7 @@ import pandas as pd
 import tqdm
 
 import config
+from functions import ini_updater
 from functions import cache as cache_mod
 from functions import density, formula
 
@@ -33,6 +34,10 @@ def song_row(entry, gen_on):
         return None
 
     difficulty = formula.calc_diff(metrics)
+
+    ini_path = pathlib.Path(f"{entry["song_path"]}/song.ini")
+    
+    ini_updater.update_ini_value(ini_path, "diff_guitar", difficulty["CalcTier"])
 
     return {
         'Code': entry['code'],
@@ -87,6 +92,7 @@ def main():
     parser = argparse.ArgumentParser(description="Compute metrics from a note stream cache.")
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")
+    parser.add_argument('--modify_game', action="store_true", help="Modify the in-game intensities for ease of use")
     args = parser.parse_args()
 
     analyze(cache_path=args.cache, header=args.header)
