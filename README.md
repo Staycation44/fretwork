@@ -16,10 +16,10 @@ Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everythin
 
 To use the tool setup **config** and run these in order:
 
-1. **Build** - scan a library and save everything into a cache file
-2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula
+1. **Build** - scan a library and save everything into a cache file. Creates a backup of original difficulties
+2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula. With a parameter, allows you to adjust the values in-game based on which difficulty calculation you prefer.
 3. **Render** - output a PNG graph of metrics over time for one or more specific songs based on an ID from the CSV
-
+4. **Restore** - Restores all difficulties to normal from the backup built by Build.
 ---
 
 ## 1. Setup: `config.py`
@@ -59,10 +59,13 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
+Additionally, this builds a backup of your original difficulties if you'd like to restore them at any point for any reason.
+
 **Outputs:**
 
 - A `{header}_cache_{timestamp}.pkl` file, the main output used by Analyze and Render
 - A `{header}_errors_{timestamp}.csv` file, only generated if some songs failed to parse, this lists which file failed and why (e.g. missing guitar track, corrupt midi file)
+- A `{header}_BackupData.csv` file, which is a back up that stores all difficulties that were found at the time of building
 - A console summary: how many songs had a `song.ini`, how many had no readable guitar chart, how many errored, and how many made it into the cache
 
 **Optional arguments:**
@@ -73,7 +76,9 @@ By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
 ## 3. Analyzing a cache
 
-`analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song in it, and writes a CSV. This is the main output for browsing the library.
+`analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song in it, and writes a CSV. This is the main output for browsing the library. 
+
+Optionally will adjust your `song.ini`'s diff_guitar parameters to the calc of your choice
 
 **Outputs:**
 
@@ -87,6 +92,7 @@ A CSV named `{header}_metrics_{timestamp}.csv`, containing a row per song includ
 
 - `--header`: analyze a different library's most recent cache
 - `--cache`: point at a specific cache file, instead of most recent for the header
+- `--modify_game`: Will take in either `CalcTier` or `RemapDiff`. If either are supplied will update values in-game with the calculation of choice. if nothing is supplied, will not update values.
 
 ---
 
