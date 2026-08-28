@@ -221,5 +221,13 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - `--header` / `--cache`: pick which library/cache to pull from
 - `--out-dir`: where to save the PNGs (defaults to `render_dir` in `config.py`)
 
+## 6. Restoring difficulties from backup
+
+`restore.py` restores your difficulties from a backup built when doing build.py. It is useful if you don't want the new modified difficulties, you can restore to your OG backup (separated by HEADER at the time). Creates one backup that can be constantly updated. Does not modify songs that already exist in the backup.
+
+**Optional Arguments:**
+- `--header`: Pick which library to restore from
+- `--path`: Pull a backup from a specific path. This is specifically the parent folder (so it would be `cache` as a default example)
+
 ## License
 **MIT** - see LICENSE for details.

@@ -14,7 +14,6 @@ timestamp of generation
 song.ini metadata (name/artist/charter/difficulty/release) 
 forumla difficulty metrics (duration, NPS/VPS metrics, D, remapped & calculated tier)
 """
-import configparser
 import argparse
 import pathlib
 

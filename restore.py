@@ -3,7 +3,6 @@ RESTORE - Restores values from the backup created upon building. Uses your HEADE
 """
 
 import argparse
-import pathlib
 
 import config
 import csv
