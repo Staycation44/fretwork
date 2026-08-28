@@ -22,10 +22,10 @@ from datetime import datetime
 # ------
 
 # Library to scan. set here or override on the command line with --search-path.
-SEARCH_PATH = r"C:\Users\reyd0\Documents\Clone Hero\PlayerData\Songs" # edit to your library path before running Build
+SEARCH_PATH = r"C:\Users\user\Documents\Clone Hero\Songs" # edit to your library path before running Build
 
 # Identifies this run. Overridable with --header.
-HEADER = "MainCache" # edit to title your cache before running Build/Analyze/Render
+HEADER = "FullTest" # edit to title your cache before running Build/Analyze/Render
 
 #------------------------------
 # RENDER output directory - DON'T NEED TO EDIT, these dump to the tool's folder
