@@ -4,11 +4,15 @@ This is an analysis tool intended to calculate Expert Guitar song difficulty fro
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
 
-Extension areas - Ideas I had, but wasn't able to complete:
-- Other song formats, difficulties other than expert
-- Extend the approach to drums — a logical next step
-- A more complete strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret.
-- The real dream - integrating a refined version of this into a community game like YARG as an option for difficulty display
+Extension areas / Fixes:
+- Ini parsing issues
+- Midi files misbehaving
+- Adding Easy/Med/Hard
+- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys)
+- Vocals (Unique data, new metric needs, new difficulty logic/calcs)
+- Drums (similar data, new metric needs, new difficulty logic/calcs)
+- Testing pattern recognition (chords, trills, runs, zigs, quads, quints, etc)
+- A strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret.
 
 Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everything else is in the base python install (as of 3.14.4 where this was built/tested)
 
