@@ -1,4 +1,4 @@
-# Fretwork v0.6 - Expert Guitar Difficulty Analyzer
+# Fretwork v0.6.2 - Expert Guitar Difficulty Analyzer
 
 This is an analysis tool intended to calculate Expert Guitar song difficulty from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics. This started as a way to learn python and see if I could even begin to calculate difficulty from song data. A few months later it is a much larger and more complex project than I first expected.
 
