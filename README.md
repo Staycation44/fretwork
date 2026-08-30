@@ -5,7 +5,7 @@ This is an analysis tool intended to calculate Expert Guitar song difficulty fro
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
 
 Extension areas / Fixes:
-- Ini parsing issues
+- ~~Ini parsing issues~~ fixed by 1337raspberry
 - Midi files misbehaving
 - Adding Easy/Med/Hard
 - Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys)
