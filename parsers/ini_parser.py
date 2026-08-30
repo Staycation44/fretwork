@@ -5,7 +5,6 @@ also captures star-power pitch disambiguation for .mid: (multiplier_note / star_
 Source tables (gh/rb/ch) and html-tag cleanup regex live here
 """
 
-import configparser
 import pathlib
 import re
 
@@ -67,18 +66,37 @@ def _parse_int_tag(raw):
         return None
 
 
-def ini_parse(file):
-    config = configparser.ConfigParser(strict=False)
+# no declared encoding - usually utf-8, cp1252 from older tools, utf-16 if saved from notepad
+def _read_text(file):
+    raw = file.read_bytes()
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        return raw.decode('utf-16', errors='replace')
     try:
-        config.read(file, encoding='utf-8-sig')
+        return raw.decode('utf-8-sig')
     except UnicodeDecodeError:
-        config.read(file, encoding='cp1252')
+        return raw.decode('cp1252', errors='replace')
 
-    section = 'song' if config.has_section('song') else (config.sections()[0] if config.sections() else None)
-    if section is None:
-        raise ValueError(f"No sections found in {file}")
 
-    ini = config[section]
+# key = value parse, same as chart_parser.parse_chart
+# not configparser - it chokes on % and line breaks in loading_phrase
+# [section] lines skipped (only ever [song]), keys lowercased, last dupe wins
+def parse_ini(file):
+    ini = {}
+    for line in _read_text(file).splitlines():
+        line = line.strip()
+        if not line or line[0] in ';#[':
+            continue
+        if '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        ini[key.strip().lower()] = value.strip()
+    return ini
+
+
+def ini_parse(file):
+    ini = parse_ini(file)
+    if not ini:
+        raise ValueError(f"No key = value metadata found in {file}")
 
     # clean up tags & fix missing data, hard codes for malformed or missing
     name = DETAG.sub("", ini.get('name', 'unk'))
