@@ -3,6 +3,7 @@ BUILD - longest part of the process - builds a library cache for analysis/visual
 
 Parses every song.ini, notes.chart and notes.mid under config's search_path, 
 joins them by file path, assigns retrieval codes, and writes one consolidated timestamped cache
+Additionally backs up every song's original diff_guitar to {header}_BackupData.csv
 
 Run this once or whenever your song library changes significantly
 
@@ -16,11 +17,11 @@ ini is parsed first on purpose - need to pass down tags for mid sp/solo
 
 import argparse
 import csv
-from pathlib import Path
 
 import config
 from parsers import chart_parser, ini_parser, mid_parser
 from functions import cache as cache_mod
+from functions import ini_updater
 
 # The ini columns that survive to the metrics CSV
 META_KEYS = ('Name', 'Artist', 'Charter', 'Difficulty', 'Release', 'Official')
@@ -85,7 +86,12 @@ def build_cache(search_path=None, header=None, out_dir=None):
             'spans': stream['spans'],
         }
 
-        backup_data(song_path, ini_row["Difficulty"], f"caches/{header}_BackupData.csv")
+    print("Backing up original difficulties")
+    backed_up = ini_updater.backup_data(
+        ((song_path, ini_rows[song_path]["Difficulty"]) for song_path in songs),
+        header, config.CACHE_DIR,
+    )
+    print(f"New songs backed up: {backed_up}")
 
     codes = cache_mod.assign_codes(songs.keys())
     for song_path, code in codes.items():
@@ -129,25 +135,6 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     return built
 
-BACKUP_COLUMNS = ["song_path", "diff_guitar"]
-
-def backup_data(song_path, original_diff, backup_csv):
-    backup_csv = Path(backup_csv)
-    is_new = not backup_csv.exists()
-
-    if not is_new:
-        with open(backup_csv, "r", newline="", encoding="utf-8") as f:
-            existing_paths = {row["song_path"] for row in csv.DictReader(f)}
-        if str(song_path) in existing_paths:
-            return
-
-    with open(backup_csv, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=BACKUP_COLUMNS)
-
-        if is_new:
-            writer.writeheader()
-        row = {"song_path": str(song_path), "diff_guitar": str(original_diff)}
-        writer.writerow(row)
 
 def main():
     parser = argparse.ArgumentParser(description="Build a notestream cache from a song library.")

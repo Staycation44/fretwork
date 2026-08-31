@@ -9,9 +9,11 @@ A header of "FullTest" gives you:
     FullTest_cache_08052026-0330.pkl, - from Build
     FullTest_errors_08052026-0330.csv, - from Build (with errors)
     FullTest_metrics_08052026-0330.csv, - from Analyze
+    FullTest_BackupData_08052026-0330.csv - from Build (original song.ini diff_guitar values)
 
 changing the header here also defines the cache Analyze will calculate from or
 which cache Render will use for visualization retrieval codes (overridable with args)
+or which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
 """
 
 import pathlib
@@ -41,6 +43,24 @@ KIND_DIRS = {
     'errors': CACHE_DIR,
     'metrics': METRICS_DIR,
 }
+
+# ------------------------
+# song.ini difficulty write-back - OPTIONAL, off by default
+# ------------------------
+# checked during ANALYZE
+# BUILD backs up every song's original diff_guitar to {header}_BackupData.csv regardless
+#
+# DIFF_WRITE_MODE controls what ANALYZE does with the calculated difficulty:
+#    None        - don't touch song.ini at all (default)
+#   "CalcTier"   - write the continuous log-scaled tier to diff_guitar
+#   "RemapDiff"  - write the manual 0-6 remap to diff_guitar
+#   "Restore"    - restore every song.ini for this header back to its
+#                  backed-up original instead of writing a calculated value
+#
+# Overridable per-run with --diff-mode on ANALYZE
+# Safest to leave this at None and use --diff-mode when you actually want to override
+
+DIFF_WRITE_MODE = None #None | "CalcTier" | "RemapDiff" | "Restore"
 
 
 # ----------------
