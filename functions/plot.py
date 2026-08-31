@@ -64,7 +64,7 @@ def release_label(meta, limit=None):
     return f"{_ellipsize(release, limit)} ({tag})"
 
 # right side metatdata header - charter / release (tag) / file type / D / calc tier / remap bin
-def meta_header(entry, difficulty, profile):
+def meta_header(entry, difficulty, profile, original_diff=None):
     meta = entry.get('meta', {})
 
     bits = [
@@ -73,13 +73,14 @@ def meta_header(entry, difficulty, profile):
         str(entry.get('source_format', '?')),
     ]
 
+# meta.Difficulty is set from song.ini at last Build (usually official)
     if difficulty is not None:
-        remap = difficulty.get('RemapDiff')
+        remap = difficulty.get('RemapDiff') 
+        diff_value = original_diff if original_diff is not None else meta.get('Difficulty', '-')
         bits.append(f"D {difficulty['D']:.2f}")
-        bits.append(f"guitar_diff {meta.get('Difficulty', '-')}")
+        bits.append(f"diff {diff_value}")
         bits.append(f"remap bin {remap if remap is not None else '-'}")
         bits.append(f"calc tier {difficulty['CalcTier']}")
-
     return '  |  '.join(bits)
 
 # flat average distance for header fitting
@@ -154,9 +155,10 @@ def _draw_spans(ax, spans, profile, solo_color):
 #    entry: cached song entry
 #    curves: output of functions.curves.compute_curves
 #    difficulty: optional dict from formula.compute_difficulty, for header
+#    original_diff: optional backed-up original diff_guitar, for header
 #    profile: style dict + theme
 #    Returns the written path.
-def render_song(entry, curves, difficulty=None, profile=None, out_dir=None):
+def render_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
     profile = dict(profile) if profile else dict(config.RENDER_DEFAULT)
     theme = resolve_theme(profile)
     out_dir = pathlib.Path(out_dir or config.RENDER_DIR)
@@ -225,7 +227,7 @@ def render_song(entry, curves, difficulty=None, profile=None, out_dir=None):
                  fontsize=profile['tick_size'], labelcolor=theme['text_color'])
 
     # Metadata Header
-    right_text = meta_header(entry, difficulty, profile)
+    right_text = meta_header(entry, difficulty, profile, original_diff)
     ax_nv.set_title(' ', fontsize=profile['title_size'], loc='left')
     ax_nv.set_title(' ', fontsize=profile['tick_size'], loc='right')
 

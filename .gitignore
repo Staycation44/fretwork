@@ -1,18 +1,6 @@
-__pycache__/config.cpython-314.pyc
-caches/.~lock.iniTest_errors_08302026-1602.csv#
-caches/iniTest_cache_08302026-1602.pkl
-caches/iniTest_errors_08302026-1602.csv
-functions/__pycache__/cache.cpython-314.pyc
-functions/__pycache__/curves.cpython-314.pyc
-functions/__pycache__/density.cpython-314.pyc
-functions/__pycache__/formula.cpython-314.pyc
-functions/__pycache__/plot.cpython-314.pyc
-metrics/.~lock.iniTest_metrics_08302026-1602.csv#
-metrics/iniTest_metrics_08302026-1602.csv
-parsers/__pycache__/chart_parser.cpython-314.pyc
-parsers/__pycache__/ini_parser.cpython-314.pyc
-parsers/__pycache__/mid_parser.cpython-314.pyc
-parsers/__pycache__/timing.cpython-314.pyc
-renders/39187503_Dragonforce - Through the Fire and Flames.png
-renders/84337250_DragonForce - Through the Fire and Flames RB4 version.png
-renders/20946609_Gus G. - Force Majeure feat. Vinnie Moore.png
+__pycache__/
+*.pkl
+caches/
+*.csv
+*.png
+*.csv#

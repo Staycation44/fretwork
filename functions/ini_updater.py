@@ -1,5 +1,5 @@
 """
-INI_UPDATER - Everything that touches song.ini's diff_guitar value:
+INI_UPDATER - Updates or restores song.ini's diff_guitar value:
 
 - update_ini_value() / get_ini_value(): read or patch one key in [song]
 - backup_data(): backs up each song's original diff_guitar the first time it's seen (during BUILD)
@@ -25,13 +25,11 @@ VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
 
 
 # ---------------------------------------------------------------------
-# Tolerant ini read/write
+# ini read/write
 # ---------------------------------------------------------------------
 
 # Same BOM/utf-8/cp1252 fallback as parsers.ini_parser._read_text, but
 # keeps the detected encoding around so writes can match it exactly
-# (including whether the file had a BOM at all) instead of always forcing
-# utf-8-sig like the old ini_updater did.
 def _read_text(file):
     raw = pathlib.Path(file).read_bytes()
     if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
@@ -49,9 +47,7 @@ def _write_text(file, text, encoding):
     pathlib.Path(file).write_bytes(text.encode(encoding, errors=errors))
 
 
-# bounds (start, end) of the [song] section body (end exclusive), matched
-# case-insensitively like the old ini_updater's section lookup.
-# (None, None) if no [song] section exists.
+# bounds (start, end) of the [song] section body (end exclusive)
 def _song_section_bounds(lines):
     start = None
     for i, line in enumerate(lines):
@@ -65,11 +61,9 @@ def _song_section_bounds(lines):
         return start, len(lines)
     return None, None
 
-
-# Patches a single key = value line inside [song]. Everything else in the
-# file - comments, other keys' casing/spacing, stray non key=value lines,
-# encoding, trailing newline - is left exactly as it was. Adds the key at
-# the end of the section if it isn't already present.
+# Patches a single key = value line inside [song]
+# Leaves everything else alone
+# Adds the key at the end of the section if it isn't already present
 def update_ini_value(ini_path, key, value):
     text, encoding = _read_text(ini_path)
     newline = '\r\n' if '\r\n' in text else '\n'
@@ -126,7 +120,7 @@ def get_ini_value(ini_path, key):
 
 
 # ---------------------------------------------------------------------
-# Backup - written by build.py, read by restore_from_backup()
+# Backup - written by build.py / read by restore_from_backup()
 # ---------------------------------------------------------------------
 
 def backup_csv_path(header, cache_dir):
@@ -140,11 +134,17 @@ def _existing_backup_paths(backup_csv):
         return {row["song_path"] for row in csv.DictReader(f)}
 
 
-# songs: iterable of (song_path, original_diff_guitar) pairs, e.g. from
-# build.py's ini_rows. Loads the existing-paths set once up front (not once
-# per song, like the old per-song backup_data() did) and skips any path
-# already backed up, so re-running build never overwrites a real original
-# with an already-modified value. Returns how many new rows were written.
+# song_path -> original diff_guitar, from the backup CSV
+# Used by render.py to show the original difficulty regardless updates
+# Returns {} if no backup exists yet for this header (old caches/metrics)
+def load_backup_diffs(header, cache_dir):
+    backup_csv = backup_csv_path(header, cache_dir)
+    if not backup_csv.exists():
+        return {}
+    with open(backup_csv, "r", newline="", encoding="utf-8") as f:
+        return {row["song_path"]: row["diff_guitar"] for row in csv.DictReader(f)}
+
+# songs: iterable of (song_path, original_diff_guitar) pairs from build.py's ini_rows
 def backup_data(songs, header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
     backup_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -168,10 +168,8 @@ def backup_data(songs, header, cache_dir):
     return len(new_rows)
 
 
-# Restores every song.ini for header back to its backed-up diff_guitar.
-# Returns (restored_count, failures) where failures is a list of
-# (song_path, error_type, message) - e.g. the song folder was moved or
-# deleted since the backup was written.
+# Restores every song.ini for header back to its backed-up diff_guitar
+# Returns (restored_count, failures) if the song folder was moved, deleted, etc
 def restore_from_backup(header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
     if not backup_csv.exists():
@@ -192,15 +190,12 @@ def restore_from_backup(header, cache_dir):
     return restored, failed
 
 
-# ---------------------------------------------------------------------
-# Single entry point - config.DIFF_WRITE_MODE drives this from analyze.py
-# ---------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
+# SYNC - config.DIFF_WRITE_MODE drives ANALYZE behavior (none/write/restore)
+# -----------------------------------------------------------------------------
 # mode:          None | "CalcTier" | "RemapDiff" | "Restore"
-# songs:         iterable of song_path - only needed for CalcTier/RemapDiff
-# difficulties:  dict song_path -> formula.calc_diff() result - only needed
-#                for CalcTier/RemapDiff
-# Returns None if mode is None (no-op), otherwise a small summary dict.
+# songs:         iterable of song_path for diff write modes
+# difficulties:  dict song_path -> formula.calc_diff() result for diff write modes
 def sync_difficulty(mode, header, cache_dir, songs=None, difficulties=None):
     if mode is None:
         return None

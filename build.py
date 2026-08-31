@@ -62,7 +62,7 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     note_index = build_note_index(search_path, mult_notes, errors)
 
-    print("Joining metadata and building difficulty backup")
+    print("Joining metadata")
     songs = {}
     no_guitar = 0
 
