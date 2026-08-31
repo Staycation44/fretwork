@@ -1,4 +1,4 @@
-# Fretwork v0.6 - Expert Guitar Difficulty Analyzer
+# Fretwork v0.6.3 - Expert Guitar Difficulty Analyzer
 
 This is an analysis tool intended to calculate Expert Guitar song difficulty from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics. This started as a way to learn python and see if I could even begin to calculate difficulty from song data. A few months later it is a much larger and more complex project than I first expected.
 
@@ -21,9 +21,8 @@ Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everythin
 To use the tool setup **config** and run these in order:
 
 1. **Build** - scan a library and save everything into a cache file. Creates a backup of original difficulties
-2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula. With a parameter, allows you to adjust the values in-game based on which difficulty calculation you prefer.
+2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula. Optionally, with `--diff-mode` or `config.DIFF_WRITE_MODE`, writes a calculated difficulty into your `song.ini` files, or restores them back to their backed-up originals
 3. **Render** - output a PNG graph of metrics over time for one or more specific songs based on an ID from the CSV
-4. **Restore** - Restores all difficulties to normal from the backup built by Build.
 ---
 
 ## 1. Setup: `config.py`
@@ -34,6 +33,7 @@ Before running anything, open `config.py` and check these values:
 |---|---|---|
 | `SEARCH_PATH` | Sets the folder to cache/analyze | `r"C:\Users\[user]\Documents\Clone Hero\Songs"` |
 | `HEADER` | A short name for the library, becomes the prefix on every output file | `"Library"` |
+| `DIFF_WRITE_MODE` | Change from None to allow Analyze to write/restore your `song.ini` files | `"CalcTier"` |
 
 `SEARCH_PATH` - this tool has only been tested on windows devices, but should work on Mac/Linux with updated file paths.
 
@@ -63,7 +63,7 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
-Additionally, this builds a backup of your original difficulties if you'd like to restore them at any point for any reason.
+Additionally, this always backs up your original difficulties as it scans, regardless of anything set in `config.py` - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you ever want to.
 
 **Outputs:**
 
@@ -82,7 +82,7 @@ Additionally, this builds a backup of your original difficulties if you'd like t
 
 `analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song in it, and writes a CSV. This is the main output for browsing the library. 
 
-Optionally will adjust your `song.ini`'s diff_guitar parameters to the calc of your choice
+Optionally, this step can also write to your `song.ini` files - either a calculated difficulty of your choice, or if already overwritten, restoring everything back to the original back ups from Build. This is off by default (`None`) and has to be turned on explicitly, either by setting `DIFF_WRITE_MODE` in `config.py` or by using `--diff-mode` for a one-off run. `--diff-mode` is the safest option to prevent overwriting by mistake if switching between Headers.
 
 **Outputs:**
 
@@ -96,9 +96,9 @@ A CSV named `{header}_metrics_{timestamp}.csv`, containing a row per song includ
 
 - `--header`: analyze a different library's most recent cache
 - `--cache`: point at a specific cache file, instead of most recent for the header
-- `--modify_game`: Will take in either `CalcTier` or `RemapDiff`. If either are supplied will update values in-game with the calculation of choice. if nothing is supplied, will not update values.
+- `--diff-mode`: `CalcTier`, `RemapDiff`, or `Restore`. `CalcTier`/`RemapDiff` write that calculation's value into every song's `diff_guitar`. `Restore` instead puts every song.ini for this header back to its `{header}_BackupData.csv` original - this skips metrics/CSV generation entirely, so it works even without a cache built yet. If not supplied, falls back to `config.DIFF_WRITE_MODE` (default `None`, i.e. don't touch song.ini at all).
 
-**Note: When modifying values in game, you MUST SCAN SONGS for the new metadata to work.**
+**Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
 
 ---
 
@@ -226,14 +226,6 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 **Optional arguments:**
 - `--header` / `--cache`: pick which library/cache to pull from
 - `--out-dir`: where to save the PNGs (defaults to `render_dir` in `config.py`)
-
-## 6. Restoring difficulties from backup
-
-`restore.py` restores your difficulties from a backup built when doing build.py. It is useful if you don't want the new modified difficulties, you can restore to your OG backup (separated by HEADER at the time). Creates one backup that can be constantly updated. Does not modify songs that already exist in the backup.
-
-**Optional Arguments:**
-- `--header`: Pick which library to restore from
-- `--path`: Pull a backup from a specific path. This is specifically the parent folder (so it would be `cache` as a default example)
 
 ## License
 **MIT** - see LICENSE for details.
