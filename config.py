@@ -25,8 +25,7 @@ from datetime import datetime
 SEARCH_PATH = r"C:\Users\user\Documents\Clone Hero\Songs" # edit to your library path before running Build
 
 # Identifies this run. Overridable with --header.
-HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
-
+HEADER = "FullTest" # edit to title your cache before running Build/Analyze/Render
 
 #------------------------------
 # RENDER output directory - DON'T NEED TO EDIT, these dump to the tool's folder

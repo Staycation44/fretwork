@@ -16,6 +16,7 @@ ini is parsed first on purpose - need to pass down tags for mid sp/solo
 
 import argparse
 import csv
+from pathlib import Path
 
 import config
 from parsers import chart_parser, ini_parser, mid_parser
@@ -60,7 +61,7 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     note_index = build_note_index(search_path, mult_notes, errors)
 
-    print("Joining metadata")
+    print("Joining metadata and building difficulty backup")
     songs = {}
     no_guitar = 0
 
@@ -83,6 +84,8 @@ def build_cache(search_path=None, header=None, out_dir=None):
             'notes': stream['notes'],
             'spans': stream['spans'],
         }
+
+        backup_data(song_path, ini_row["Difficulty"], f"caches/{header}_BackupData.csv")
 
     codes = cache_mod.assign_codes(songs.keys())
     for song_path, code in codes.items():
@@ -126,6 +129,25 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     return built
 
+BACKUP_COLUMNS = ["song_path", "diff_guitar"]
+
+def backup_data(song_path, original_diff, backup_csv):
+    backup_csv = Path(backup_csv)
+    is_new = not backup_csv.exists()
+
+    if not is_new:
+        with open(backup_csv, "r", newline="", encoding="utf-8") as f:
+            existing_paths = {row["song_path"] for row in csv.DictReader(f)}
+        if str(song_path) in existing_paths:
+            return
+
+    with open(backup_csv, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=BACKUP_COLUMNS)
+
+        if is_new:
+            writer.writeheader()
+        row = {"song_path": str(song_path), "diff_guitar": str(original_diff)}
+        writer.writerow(row)
 
 def main():
     parser = argparse.ArgumentParser(description="Build a notestream cache from a song library.")
