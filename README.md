@@ -1,31 +1,41 @@
 # Fretwork v0.6.3 - Expert Guitar Difficulty Analyzer
 
-This is an analysis tool intended to calculate Expert Guitar song difficulty from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics. This started as a way to learn python and see if I could even begin to calculate difficulty from song data. A few months later it is a much larger and more complex project than I first expected.
+This is an analysis tool intended to calculate Expert Guitar song difficulty from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
 
-Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everything else is in the base python install (as of 3.14.4 where this was built/tested)
+Libraries required: **pandas, numpy, tqdm, mido, and matplotlib** 
 
 ![Render Example](https://github.com/Staycation44/fretwork/blob/main/renders/02139802_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
 
 ## Using Fretwork
 To use the tool setup **config** and run these in order:
 
-1. **Build** - scan a library and save everything into a cache file. Creates a backup of original difficulties
-2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula. Optionally, with `--diff-mode` or `config.DIFF_WRITE_MODE`, writes a calculated difficulty into your `song.ini` files, or restores them back to their backed-up originals
+1. **Build** - scan a library and save everything into a cache file & creates a backup of original difficulties
+2. **Analyze** - turn Build's cache into a CSV including song metadata and calculated metrics, one row per song. Optionally, applies calculated difficulty to `song.ini` files for use in game, or restores them back to their originals from the backup
 3. **Render** - output a PNG graph of metrics over time for one or more specific songs based on an ID from the CSV
 
 ## Index
-- [1. Setup: config.py](#1-setup-configpy)
-- [2. Building a cache](#2-building-a-cache)
-- [3. Analyzing a cache](#3-analyzing-a-cache)
-- [4. The Difficulty Formula](#4-the-difficulty-formula)
-  - [NPS (Notes Per Second)](#nps-notes-per-second)
-  - [VPS (Variability Per Second)](#vps-variability-per-second)
-  - [The Math Part (D = N x V x CoV)](#the-math-part)
-- [5. Rendering song graphs](#5-rendering-song-graphs)
-- [6. Fixes/Extension Ideas](#6-fixesextension-ideas)
-- [License](#license)
+- [Fretwork v0.6.3 - Expert Guitar Difficulty Analyzer](#fretwork-v063---expert-guitar-difficulty-analyzer)
+  - [Using Fretwork](#using-fretwork)
+  - [Index](#index)
+  - [1. Setup: `config.py`](#1-setup-configpy)
+    - [Render appearance settings](#render-appearance-settings)
+  - [2. Building a cache](#2-building-a-cache)
+  - [3. Analyzing a cache](#3-analyzing-a-cache)
+  - [4. The Difficulty Formula](#4-the-difficulty-formula)
+    - [Definitions: NPS and VPS](#definitions-nps-and-vps)
+    - [NPS (Notes Per Second)](#nps-notes-per-second)
+    - [VPS (Variability Per Second)](#vps-variability-per-second)
+  - [The Math Part](#the-math-part)
+    - [Epsilon terms](#epsilon-terms)
+    - [N \& V](#n--v)
+    - [Coefficients of variation (kinda)](#coefficients-of-variation-kinda)
+    - [Interaction Term](#interaction-term)
+    - [Final D Formula](#final-d-formula)
+  - [5. Rendering song graphs](#5-rendering-song-graphs)
+  - [6. Fixes/Extension Ideas](#6-fixesextension-ideas)
+  - [License](#license)
 
 ---
 
@@ -86,7 +96,7 @@ Additionally, this always backs up your original difficulties as it scans, regar
 
 `analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song in it, and writes a CSV. This is the main output for browsing the library. 
 
-Optionally, this step can also write to your `song.ini` files - either a calculated difficulty of your choice, or if already overwritten, restoring everything back to the original back ups from Build. This is off by default (`None`) and has to be turned on explicitly, either by setting `DIFF_WRITE_MODE` in `config.py` or by using `--diff-mode` for a one-off run. `--diff-mode` is the safest option to prevent overwriting by mistake if switching between Headers.
+Optionally, this step can also write to your `song.ini` files, updating `diff_guitar` for use in game, or if already overwritten, restoring back to the original back ups from Build. This option runs via args or a setting in the config.
 
 **Outputs:**
 
@@ -100,7 +110,10 @@ A CSV named `{header}_metrics_{timestamp}.csv`, containing a row per song includ
 
 - `--header`: analyze a different library's most recent cache
 - `--cache`: point at a specific cache file, instead of most recent for the header
-- `--diff-mode`: `CalcTier`, `RemapDiff`, or `Restore`. `CalcTier`/`RemapDiff` write that calculation's value into every song's `diff_guitar`. `Restore` instead puts every song.ini for this header back to its `{header}_BackupData.csv` original - this skips metrics/CSV generation entirely, so it works even without a cache built yet. If not supplied, falls back to `config.DIFF_WRITE_MODE` (default `None`, i.e. don't touch song.ini at all).
+- `--diff-mode`: `CalcTier`, `RemapDiff`, or `Restore`.
+  - `CalcTier`/`RemapDiff` writes that calculation's value into every song's `diff_guitar`
+  - `Restore` returns all `diff_guitar` values back to its `{header}_BackupData.csv` original, throws errors for songs moved/deleted
+  - If not supplied, falls back to `config.DIFF_WRITE_MODE` (default `None`, which leaves song.ini alone)
 
 **Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
 
@@ -114,7 +127,7 @@ Both families of metrics are derived from the song's chart or MIDI note events, 
 
 A sliding window of 1 second (1000ms) is swept over the note span in steps of 250ms. This deliberately includes silent intros and rests between sections, so that metrics reflect true density variations.
 
-I am ignoring a lot of the data from the songs since this is mostly a proof of concept. Difficulties other than Expert, Tap/HOPO/Sustains, etc. In theory these impact overall song difficulty - but it's a level of additional development that's outside my current skill/comfort level. A more refined model similar to the strain model used for games like osu! would be an interesting next step.
+I am ignoring a lot of the data from the songs since this is mostly a proof of concept - see the Extensions section for ideas to include them.
 
 ### NPS (Notes Per Second)
 
@@ -198,9 +211,6 @@ $$
 - **RemapDiff (0–6):** A manual grouping, calibrated to roughly match the percentage of official releases across the seven tiers. Roughly, how would this have been tiered in a Rock Band game (capped at 6).
 - **CalcTier:** A continuous, log-scaled tiering calculation. Every 0.44 natural-log increase in D over a baseline value increments the tier by one. This value is not capped, so officials at Dragonforce level end up in 7+, and a lot of notable customs are 10+.
 
-RemapDiff is a classic 0–6 grouping, CalcTier is an open ended calculation that keeps getting higher as songs get harder.
-
-
 ---
 
 ## 5. Rendering song graphs
@@ -221,7 +231,7 @@ RemapDiff is a classic 0–6 grouping, CalcTier is an open ended calculation tha
 
 One PNG per code, named `{code}_{Artist} - {Song}.png`, showing three lines:
 
-- **D** - overall difficulty over time (approximated since it does not include the COV modifier & has to be rescaled to fit on the same axis as N & V)
+- **D** - overall difficulty over time (approximated since it does not include the CoV modifier & has to be rescaled to fit on the same axis as N & V)
 - **Notes** - note density per second
 - **Variability** - how much the fret pattern is changing per second
 
@@ -238,6 +248,7 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - Midi files misbehaving - needs more research
 
 **Extension Ideas:**
+- Spinoff game dataset CSV
 - Adding Easy/Med/Hard
 - Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys) - *In Progress*
 - Vocals (Unique data, new metric needs, new difficulty logic/calcs)
@@ -247,6 +258,7 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - Negative weighting for long empty or long slow sections (related to duration changes)
 - scoring by totals (as opposed to average), type of notes (singles by type, chords by type)
 - D by section - help sort out solo spikes even if not in a solo event (older GH games)
+- Section names for renders
 - Including strum/hopo/tap state by note in the cache
 - Actually doing something with note state once it exists (ratios over the song was a good suggestion)
 - Star Power Difficulty (how hard are SP phrases to hit?)
