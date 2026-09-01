@@ -3,6 +3,7 @@ BUILD - longest part of the process - builds a library cache for analysis/visual
 
 Parses every song.ini, notes.chart and notes.mid under config's search_path, 
 joins them by file path, assigns retrieval codes, and writes one consolidated timestamped cache
+Additionally backs up every song's original diff_guitar to {header}_BackupData.csv
 
 Run this once or whenever your song library changes significantly
 
@@ -20,6 +21,7 @@ import csv
 import config
 from parsers import chart_parser, ini_parser, mid_parser
 from functions import cache as cache_mod
+from functions import ini_updater
 
 # The ini columns that survive to the metrics CSV
 META_KEYS = ('Name', 'Artist', 'Charter', 'Difficulty', 'Release', 'Official')
@@ -83,6 +85,13 @@ def build_cache(search_path=None, header=None, out_dir=None):
             'notes': stream['notes'],
             'spans': stream['spans'],
         }
+
+    print("Backing up original difficulties")
+    backed_up = ini_updater.backup_data(
+        ((song_path, ini_rows[song_path]["Difficulty"]) for song_path in songs),
+        header, config.CACHE_DIR,
+    )
+    print(f"New songs backed up: {backed_up}")
 
     codes = cache_mod.assign_codes(songs.keys())
     for song_path, code in codes.items():

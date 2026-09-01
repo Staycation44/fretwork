@@ -22,7 +22,7 @@ import tqdm
 import config
 from functions import cache as cache_mod
 from functions import curves as curves_mod
-from functions import density, formula, plot
+from functions import density, formula, ini_updater, plot
 
 
 def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
@@ -44,6 +44,10 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
 
     out_dir = out_dir or config.RENDER_DIR
 
+    # Original diffs from backup CSV for header
+    # {} if no backup exists yet (old caches/metrics)
+    original_diffs = ini_updater.load_backup_diffs(header, config.CACHE_DIR)
+
     written = []
     for entry in tqdm.tqdm(entries, desc="Rendering", unit="song"):
         song_curves = curves_mod.calc_curves(entry['notes'])
@@ -57,7 +61,9 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
             if metrics is not None:
                 difficulty = formula.calc_diff(metrics)
 
-        written.append(plot.render_song(entry, song_curves, difficulty, out_dir=out_dir))
+        written.append(plot.render_song(entry, song_curves, difficulty,
+                                         original_diff=original_diffs.get(entry['song_path']),
+                                         out_dir=out_dir))
 
     print(f"\nPNGs written: {len(written)}")
     if written:

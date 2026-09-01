@@ -1,18 +1,8 @@
-# Fretwork v0.6.2 - Expert Guitar Difficulty Analyzer
+# Fretwork v0.6.3 - Expert Guitar Difficulty Analyzer
 
 This is an analysis tool intended to calculate Expert Guitar song difficulty from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics. This started as a way to learn python and see if I could even begin to calculate difficulty from song data. A few months later it is a much larger and more complex project than I first expected.
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
-
-Extension areas / Fixes:
-- ~~Ini parsing issues~~ fixed by 1337raspberry
-- Midi files misbehaving
-- Adding Easy/Med/Hard
-- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys)
-- Vocals (Unique data, new metric needs, new difficulty logic/calcs)
-- Drums (similar data, new metric needs, new difficulty logic/calcs)
-- Testing pattern recognition (chords, trills, runs, zigs, quads, quints, etc)
-- A strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret.
 
 Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everything else is in the base python install (as of 3.14.4 where this was built/tested)
 
@@ -20,10 +10,9 @@ Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everythin
 
 To use the tool setup **config** and run these in order:
 
-1. **Build** - scan a library and save everything into a cache file
-2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula
+1. **Build** - scan a library and save everything into a cache file. Creates a backup of original difficulties
+2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula. Optionally, with `--diff-mode` or `config.DIFF_WRITE_MODE`, writes a calculated difficulty into your `song.ini` files, or restores them back to their backed-up originals
 3. **Render** - output a PNG graph of metrics over time for one or more specific songs based on an ID from the CSV
-
 ---
 
 ## 1. Setup: `config.py`
@@ -34,6 +23,7 @@ Before running anything, open `config.py` and check these values:
 |---|---|---|
 | `SEARCH_PATH` | Sets the folder to cache/analyze | `r"C:\Users\[user]\Documents\Clone Hero\Songs"` |
 | `HEADER` | A short name for the library, becomes the prefix on every output file | `"Library"` |
+| `DIFF_WRITE_MODE` | Change from None to allow Analyze to write/restore your `song.ini` files | `"CalcTier"` |
 
 `SEARCH_PATH` - this tool has only been tested on windows devices, but should work on Mac/Linux with updated file paths.
 
@@ -63,10 +53,13 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
+Additionally, this always backs up your original difficulties as it scans, regardless of anything set in `config.py` - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you ever want to.
+
 **Outputs:**
 
 - A `{header}_cache_{timestamp}.pkl` file, the main output used by Analyze and Render
 - A `{header}_errors_{timestamp}.csv` file, only generated if some songs failed to parse, this lists which file failed and why (e.g. missing guitar track, corrupt midi file)
+- A `{header}_BackupData.csv` file, which is a back up that stores all difficulties that were found at the time of building
 - A console summary: how many songs had a `song.ini`, how many had no readable guitar chart, how many errored, and how many made it into the cache
 
 **Optional arguments:**
@@ -77,7 +70,9 @@ By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
 ## 3. Analyzing a cache
 
-`analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song in it, and writes a CSV. This is the main output for browsing the library.
+`analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song in it, and writes a CSV. This is the main output for browsing the library. 
+
+Optionally, this step can also write to your `song.ini` files - either a calculated difficulty of your choice, or if already overwritten, restoring everything back to the original back ups from Build. This is off by default (`None`) and has to be turned on explicitly, either by setting `DIFF_WRITE_MODE` in `config.py` or by using `--diff-mode` for a one-off run. `--diff-mode` is the safest option to prevent overwriting by mistake if switching between Headers.
 
 **Outputs:**
 
@@ -91,6 +86,9 @@ A CSV named `{header}_metrics_{timestamp}.csv`, containing a row per song includ
 
 - `--header`: analyze a different library's most recent cache
 - `--cache`: point at a specific cache file, instead of most recent for the header
+- `--diff-mode`: `CalcTier`, `RemapDiff`, or `Restore`. `CalcTier`/`RemapDiff` write that calculation's value into every song's `diff_guitar`. `Restore` instead puts every song.ini for this header back to its `{header}_BackupData.csv` original - this skips metrics/CSV generation entirely, so it works even without a cache built yet. If not supplied, falls back to `config.DIFF_WRITE_MODE` (default `None`, i.e. don't touch song.ini at all).
+
+**Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
 
 ---
 
@@ -218,6 +216,24 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 **Optional arguments:**
 - `--header` / `--cache`: pick which library/cache to pull from
 - `--out-dir`: where to save the PNGs (defaults to `render_dir` in `config.py`)
+
+---
+
+## 6. Fixes/Extension Ideas:
+
+- Midi files misbehaving
+- Adding Easy/Med/Hard
+- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys) - In Progress
+- Vocals (Unique data, new metric needs, new difficulty logic/calcs)
+- Drums (similar data, new metric needs, new difficulty logic/calcs)
+- Pattern recognition (chords, trills, runs, zigs, quads, quints, etc)
+- D by section - help sort out solo spikes even if not in a solo event (older GH games)
+- Including strum/hopo/tap state by note in the cache
+- Actually doing something with note state once it exists
+- Star Power Difficulty (how hard are SP phrases to hit?)
+- A strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret
+
+---
 
 ## License
 **MIT** - see LICENSE for details.

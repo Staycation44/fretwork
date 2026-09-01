@@ -9,9 +9,11 @@ A header of "FullTest" gives you:
     FullTest_cache_08052026-0330.pkl, - from Build
     FullTest_errors_08052026-0330.csv, - from Build (with errors)
     FullTest_metrics_08052026-0330.csv, - from Analyze
+    FullTest_BackupData_08052026-0330.csv - from Build (original song.ini diff_guitar values)
 
 changing the header here also defines the cache Analyze will calculate from or
 which cache Render will use for visualization retrieval codes (overridable with args)
+or which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
 """
 
 import pathlib
@@ -27,9 +29,23 @@ SEARCH_PATH = r"C:\Users\user\Documents\Clone Hero\Songs" # edit to your library
 # Identifies this run. Overridable with --header.
 HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 
+# ------------------------
+# song.ini difficulty write-back - OPTIONAL, off by default (DON'T EDIT UNLESS YOU KNOW WHAT YOU'RE DOING)
+# ------------------------
+# DIFF_WRITE_MODE controls what ANALYZE does with the calculated difficulty:
+#    None        - don't touch song.ini at all (default)
+#   "CalcTier"   - write the continuous log-scaled tier to diff_guitar
+#   "RemapDiff"  - write the manual 0-6 remap to diff_guitar
+#   "Restore"    - restore every song.ini to backup value from BUILD
+#
+# Overridable per-run with --diff-mode on ANALYZE
+# Safest to leave this at None and use --diff-mode when you actually want to override
+
+DIFF_WRITE_MODE = "None" # None | "CalcTier" | "RemapDiff" | "Restore"
 
 #------------------------------
 # RENDER output directory - DON'T NEED TO EDIT, these dump to the tool's folder
+#------------------------------
 RENDER_DIR = 'renders'
 
 # fix for cache/metrics folders 
@@ -42,6 +58,8 @@ KIND_DIRS = {
     'errors': CACHE_DIR,
     'metrics': METRICS_DIR,
 }
+
+
 
 
 # ----------------
