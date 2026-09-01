@@ -4,16 +4,6 @@ This is an analysis tool intended to calculate Expert Guitar song difficulty fro
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
 
-Extension areas / Fixes:
-- ~~Ini parsing issues~~ fixed by 1337raspberry
-- Midi files misbehaving
-- Adding Easy/Med/Hard
-- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys)
-- Vocals (Unique data, new metric needs, new difficulty logic/calcs)
-- Drums (similar data, new metric needs, new difficulty logic/calcs)
-- Testing pattern recognition (chords, trills, runs, zigs, quads, quints, etc)
-- A strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret.
-
 Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everything else is in the base python install (as of 3.14.4 where this was built/tested)
 
 ![Render Example](https://github.com/Staycation44/fretwork/blob/main/renders/02139802_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
@@ -226,6 +216,24 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 **Optional arguments:**
 - `--header` / `--cache`: pick which library/cache to pull from
 - `--out-dir`: where to save the PNGs (defaults to `render_dir` in `config.py`)
+
+---
+
+## 6. Fixes/Extension Ideas:
+
+- Midi files misbehaving
+- Adding Easy/Med/Hard
+- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys) - In Progress
+- Vocals (Unique data, new metric needs, new difficulty logic/calcs)
+- Drums (similar data, new metric needs, new difficulty logic/calcs)
+- Pattern recognition (chords, trills, runs, zigs, quads, quints, etc)
+- D by section - help sort out solo spikes even if not in a solo event (older GH games)
+- Including strum/hopo/tap state by note in the cache
+- Actually doing something with note state once it exists
+- Star Power Difficulty (how hard are SP phrases to hit?)
+- A strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret
+
+---
 
 ## License
 **MIT** - see LICENSE for details.
