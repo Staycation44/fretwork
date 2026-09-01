@@ -8,11 +8,25 @@ Libraries required are **pandas, numpy, tqdm, mido, and matplotlib** - everythin
 
 ![Render Example](https://github.com/Staycation44/fretwork/blob/main/renders/02139802_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
 
+## Using Fretwork
 To use the tool setup **config** and run these in order:
 
 1. **Build** - scan a library and save everything into a cache file. Creates a backup of original difficulties
 2. **Analyze** - turn that cache into a CSV including song metadata and calculated metrics, one row per song - this step applies the difficulty formula. Optionally, with `--diff-mode` or `config.DIFF_WRITE_MODE`, writes a calculated difficulty into your `song.ini` files, or restores them back to their backed-up originals
 3. **Render** - output a PNG graph of metrics over time for one or more specific songs based on an ID from the CSV
+
+## Index
+- [1. Setup: config.py](#1-setup-configpy)
+- [2. Building a cache](#2-building-a-cache)
+- [3. Analyzing a cache](#3-analyzing-a-cache)
+- [4. The Difficulty Formula](#4-the-difficulty-formula)
+  - [NPS (Notes Per Second)](#nps-notes-per-second)
+  - [VPS (Variability Per Second)](#vps-variability-per-second)
+  - [The Math Part (D = N x V x CoV)](#the-math-part)
+- [5. Rendering song graphs](#5-rendering-song-graphs)
+- [6. Fixes/Extension Ideas](#6-fixesextension-ideas)
+- [License](#license)
+
 ---
 
 ## 1. Setup: `config.py`
@@ -219,19 +233,27 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 
 ---
 
-## 6. Fixes/Extension Ideas:
+## 6. Fixes/Extension Ideas
+**Fixes:**
+- Midi files misbehaving - needs more research
 
-- Midi files misbehaving
+**Extension Ideas:**
 - Adding Easy/Med/Hard
-- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys) - In Progress
+- Other 5 Fret instruments (Co-op/Rhythm Guitar, Bass, Keys) - *In Progress*
 - Vocals (Unique data, new metric needs, new difficulty logic/calcs)
 - Drums (similar data, new metric needs, new difficulty logic/calcs)
-- Pattern recognition (chords, trills, runs, zigs, quads, quints, etc)
+- RB style band diff once all instruments are in
+- Retesting duration and ways to include it (GHVH outliers)
+- Negative weighting for long empty or long slow sections (related to duration changes)
+- scoring by totals (as opposed to average), type of notes (singles by type, chords by type)
 - D by section - help sort out solo spikes even if not in a solo event (older GH games)
 - Including strum/hopo/tap state by note in the cache
-- Actually doing something with note state once it exists
+- Actually doing something with note state once it exists (ratios over the song was a good suggestion)
 - Star Power Difficulty (how hard are SP phrases to hit?)
-- A strain-based difficulty metric factoring in note state (strum/hopo/tap) and splitting strum vs fret
+- Rhythm changes/variability possibly easier than pattern recognition?
+- Pattern recognition (chords, trills, runs, zigs, quads, quints, anchoring, etc)
+- A strain-based difficulty metric splitting strum vs fret
+- DDR Groove Radar style scoring (probably tied to patterns)
 
 ---
 
