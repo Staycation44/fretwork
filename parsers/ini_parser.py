@@ -156,7 +156,7 @@ def ini_loop(search_path, errors=None):
             ini_out.append(ini_parse(file))
         except Exception as exc:
             if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc)))
+                errors.append((str(file), type(exc).__name__, str(exc) or repr(exc)))
             continue
 
     return pd.DataFrame(ini_out)

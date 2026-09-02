@@ -63,6 +63,19 @@ M_OPEN_CNL = 5
 ENH_OPEN = 'ENHANCED_OPENS'
 
 
+# ---------------------------------------------
+# EOF diagnostics - reporting for broken files
+# ---------------------------------------------
+# mido raises a blank EOFError() or OSError(), adding a little info, hopefully this helps someone torubleshoot
+# attempted some recovery of partial note streams from truncated files, but it didn't help much
+def _diagnose_eof(mid_source):
+    try:
+        size = pathlib.Path(mid_source).stat().st_size
+    except OSError as exc:
+        return f"couldn't stat file to report its size ({exc})"
+    return f"{size}-byte file"
+
+
 # ----------
 # Tempo map
 # ----------
@@ -184,7 +197,17 @@ def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
 
 
 def mid_notes(mid_source, multiplier_note=None):
-    mid = mido.MidiFile(str(mid_source), clip=True)
+    try:
+        mid = mido.MidiFile(str(mid_source), clip=True)
+    except (EOFError, OSError) as exc:
+        # these errors mean truncated/corrupted file
+        if type(exc) not in (EOFError, OSError):
+            raise
+        raise type(exc)(
+            f"{_diagnose_eof(mid_source)} - corrupt or truncated midi "
+            f"({type(exc).__name__} from mido)"
+        ) from exc
+
     tick_res = mid.ticks_per_beat
 
     tempos, sorted_ticks, cum_ms = map_mid_tempo(mid)
@@ -203,7 +226,7 @@ def mid_notes(mid_source, multiplier_note=None):
                 break
 
         if track is None:
-            continue  # this instrument's track just isn't in the file - not an error
+            continue  # this instrument just isn't in the file - not an error
 
         stream = _extract_track(track, instrument_key, to_ms, multiplier_note)
         if stream is not None:
@@ -242,7 +265,8 @@ def mid_loop(search_path, multiplier_notes=None, errors=None):
             mid_out[stream['song_path']] = stream
         except Exception as exc:
             if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc)))
+                message = str(exc) or repr(exc)
+                errors.append((str(file), type(exc).__name__, message))
             continue
 
     return mid_out

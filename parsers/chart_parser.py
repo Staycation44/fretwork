@@ -221,7 +221,7 @@ def chart_notes(chart_source):
                 break
 
         if not section:
-            continue  # this instrument's section just isn't in the file - not an error
+            continue  # this instrument just isn't in the file - not an error
 
         stream = _extract_section(section, instrument_key, to_ms)
         if stream is not None:
@@ -255,7 +255,7 @@ def chart_loop(search_path, errors=None):
             chart_out[stream['song_path']] = stream
         except Exception as exc:
             if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc)))
+                errors.append((str(file), type(exc).__name__, str(exc) or repr(exc)))
             continue
 
     return chart_out

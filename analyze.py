@@ -27,9 +27,6 @@ from functions import instruments
 from functions import cache as cache_mod
 from functions import density, formula, ini_updater, xlsx_format, timestamp
 
-# song.ini's 'Name' tag is displayed as 'Song Title' in the workbook - renamed at
-# output time only; internal dict/DataFrame keys before that point stay 'Name' to match
-# ini_parser/build.py.
 COLUMN_ORDER = [
     'Code', 'Song Title', 'Artist', 'Type', 'Charter', 'Release', 'Official',
     'NoteCount', 'DurationS',
@@ -43,7 +40,6 @@ def song_row(code, meta, inst_entry, instrument_key):
     metrics = density.calc_metrics(inst_entry['notes'])
     if metrics is None:
         return None
-
     difficulty = formula.calc_diff(metrics, instrument_key)
 
     row_meta = {
@@ -131,9 +127,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             df = pd.DataFrame(rows)
             df = df.rename(columns={'Name': 'Song Title'})
 
-            # Difficulty comes off song.ini as a string ('-1' default, or whatever the
-            # charter wrote) - coerce to numeric so both the -1 white-sentinel check and
-            # the pastel color scale in xlsx_format read real numbers, not text.
+            # Difficulty comes from song.ini as a string, convert to numeric and fill missing with -1
             df['Difficulty'] = pd.to_numeric(df['Difficulty'], errors='coerce').fillna(-1).astype(int)
 
             df = df[COLUMN_ORDER].round(2)

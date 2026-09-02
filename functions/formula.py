@@ -79,6 +79,8 @@ CALCTIER_PARAMS = {
 
 # RB manual 0-6 fit
 def remap_diff(D, instrument='guitar'):
+    if D <= 0:
+        return 0  # broken/zero-density songs -> 0
     bin_edges = REMAP_BINS[CALIBRATION_GROUP[instrument]]
     lower = bin_edges[0]
     for label, upper in zip(DIFF_LABELS, bin_edges[1:]):
