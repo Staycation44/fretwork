@@ -1,15 +1,18 @@
 """
-INI_UPDATER - Updates or restores song.ini's diff_guitar value:
+INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instrument:
 
 - update_ini_value() / get_ini_value(): read or patch one key in [song]
-- backup_data(): backs up each song's original diff_guitar the first time it's seen (during BUILD)
-- restore_from_backup(): each song's original diff_guitar for a header to its backed-up original
-- sync_difficulty(): ANALYZE decision, driven by config.DIFF_WRITE_MODE to:
-    write CalcTier/RemapDiff into song.ini for a difficulty mode
-    OR run restore_from_backup() when mode is "Restore"
+- backup_data(): backs up each song's original diff_* values the first time it's seen
+  (during BUILD) - one row per song, one column per instrument's diff tag
+- restore_from_backup(): restores every diff_* tag present in the backup back to its original value for every instrument
+- sync_difficulty(): ANALYZE decision, driven by config.DIFF_WRITE_MODE (or --diff-mode) to:
+    write CalcTier/RemapDiff into song.ini's diff_<instrument> tag for one instrument's mode
+    OR run restore_from_backup() when mode is "Restore" (restores every instrument at once)
     OR do nothing when mode is None
 
-config.DIFF_WRITE_MODE = "Restore" calls restore_from_backup() directly and skips metrics/CSV generation
+Analyze runs all instruments, so sync_difficulty is called once per instrument tab
+
+Restore calls restore_from_backup() directly and skips metrics/workbook generation
 
 update_ini_value() patches with a targeted line replacement inside the [song] section,
 preserving everything else in the file and preventing the BOM/encoding from being changed
@@ -19,8 +22,10 @@ It will also add the key if it doesn't exist
 import csv
 import pathlib
 
-DIFF_KEY = "diff_guitar"
-BACKUP_COLUMNS = ["song_path", "diff_guitar"]
+from functions import instruments
+
+# backup CSV columns: song_path + one column per instrument's actual ini tag name
+BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
 VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
 
 
@@ -134,28 +139,39 @@ def _existing_backup_paths(backup_csv):
         return {row["song_path"] for row in csv.DictReader(f)}
 
 
-# song_path -> original diff_guitar, from the backup CSV
-# Used by render.py to show the original difficulty regardless updates
+# song_path -> {instrument_key: original diff value}, from the backup CSV
+# Used by render.py to show the original difficulty for whichever instrument is rendered
 # Returns {} if no backup exists yet for this header (old caches/metrics)
 def load_backup_diffs(header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
     if not backup_csv.exists():
         return {}
+    out = {}
     with open(backup_csv, "r", newline="", encoding="utf-8") as f:
-        return {row["song_path"]: row["diff_guitar"] for row in csv.DictReader(f)}
+        for row in csv.DictReader(f):
+            out[row["song_path"]] = {
+                instrument_key: (row.get(diff_tag) or '-1')
+                for instrument_key, diff_tag in instruments.DIFF_TAGS.items()
+            }
+    return out
 
-# songs: iterable of (song_path, original_diff_guitar) pairs from build.py's ini_rows
+# songs: iterable of (song_path, difficulties) pairs
 def backup_data(songs, header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
     backup_csv.parent.mkdir(parents=True, exist_ok=True)
     existing_paths = _existing_backup_paths(backup_csv)
     is_new = not backup_csv.exists()
 
-    new_rows = [
-        {"song_path": str(song_path), "diff_guitar": str(diff)}
-        for song_path, diff in songs
-        if str(song_path) not in existing_paths
-    ]
+    new_rows = []
+    for song_path, difficulties in songs:
+        if str(song_path) in existing_paths:
+            continue
+        difficulties = difficulties or {}
+        row = {"song_path": str(song_path)}
+        for instrument_key, diff_tag in instruments.DIFF_TAGS.items():
+            row[diff_tag] = str(difficulties[instrument_key]) if instrument_key in difficulties else ''
+        new_rows.append(row)
+
     if not new_rows:
         return 0
 
@@ -168,8 +184,9 @@ def backup_data(songs, header, cache_dir):
     return len(new_rows)
 
 
-# Restores every song.ini for header back to its backed-up diff_guitar
-# Returns (restored_count, failures) if the song folder was moved, deleted, etc
+# Restores every song.ini for header back to its backed-up diff_* values,
+# a blank column means that instrument wasn't charted for that song at backup time / no tag added
+# Returns (restored_count, failures) if a song folder was moved, deleted, etc
 def restore_from_backup(header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
     if not backup_csv.exists():
@@ -180,12 +197,18 @@ def restore_from_backup(header, cache_dir):
     with open(backup_csv, "r", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             song_path = row["song_path"]
-            difficulty = row["diff_guitar"]
-            try:
-                update_ini_value(f"{song_path}/song.ini", DIFF_KEY, difficulty)
+            song_failed = False
+            for instrument_key, diff_tag in instruments.DIFF_TAGS.items():
+                value = row.get(diff_tag)
+                if not value:
+                    continue  # blank column, leave song.ini alone
+                try:
+                    update_ini_value(f"{song_path}/song.ini", diff_tag, value)
+                except Exception as exc:
+                    failed.append((song_path, instrument_key, type(exc).__name__, str(exc)))
+                    song_failed = True
+            if not song_failed:
                 restored += 1
-            except Exception as exc:
-                failed.append((song_path, type(exc).__name__, str(exc)))
 
     return restored, failed
 
@@ -194,9 +217,11 @@ def restore_from_backup(header, cache_dir):
 # SYNC - config.DIFF_WRITE_MODE drives ANALYZE behavior (none/write/restore)
 # -----------------------------------------------------------------------------
 # mode:          None | "CalcTier" | "RemapDiff" | "Restore"
+# instrument:    which instrument's diff_* tag to write (required for CalcTier/RemapDiff,
+#                unused/omit for Restore - Restore always covers every instrument at once)
 # songs:         iterable of song_path for diff write modes
 # difficulties:  dict song_path -> formula.calc_diff() result for diff write modes
-def sync_difficulty(mode, header, cache_dir, songs=None, difficulties=None):
+def sync_difficulty(mode, header, cache_dir, instrument=None, songs=None, difficulties=None):
     if mode is None:
         return None
 
@@ -209,18 +234,20 @@ def sync_difficulty(mode, header, cache_dir, songs=None, difficulties=None):
               (f", {len(failed)} failed" if failed else ""))
         return {"mode": mode, "restored": restored, "failed": failed}
 
-    if songs is None or difficulties is None:
-        raise ValueError(f"diff mode '{mode}' needs songs + difficulties")
+    if songs is None or difficulties is None or instrument is None:
+        raise ValueError(f"diff mode '{mode}' needs songs + difficulties + instrument")
+
+    diff_tag = instruments.DIFF_TAGS[instrument]
 
     applied = 0
     failed = []
     for song_path in songs:
         try:
-            update_ini_value(f"{song_path}/song.ini", DIFF_KEY, difficulties[song_path][mode])
+            update_ini_value(f"{song_path}/song.ini", diff_tag, difficulties[song_path][mode])
             applied += 1
         except Exception as exc:
             failed.append((song_path, type(exc).__name__, str(exc)))
 
-    print(f"Applied {mode} to {applied} song.ini file(s)" +
+    print(f"Applied {mode} to {applied} song.ini file(s) [{instrument}]" +
           (f", {len(failed)} failed" if failed else ""))
-    return {"mode": mode, "applied": applied, "failed": failed}
+    return {"mode": mode, "instrument": instrument, "applied": applied, "failed": failed}

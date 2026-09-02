@@ -1,6 +1,8 @@
 """
-INI_PARSER - Parses song.ini files for metadata (name/artist/charter/difficulty/release) 
+INI_PARSER - Parses song.ini files for metadata (name/artist/charter/difficulty/release)
 also captures star-power pitch disambiguation for .mid: (multiplier_note / star_power_note).
+
+Difficulty is captured per-instrument (see instruments.DIFF_TAGS) 
 
 Source tables (gh/rb/ch) and html-tag cleanup regex live here
 """
@@ -10,6 +12,8 @@ import re
 
 import pandas as pd
 import tqdm
+
+from functions import instruments
 
 # --------------
 # Source tables
@@ -102,8 +106,14 @@ def ini_parse(file):
     name = DETAG.sub("", ini.get('name', 'unk'))
     artist = DETAG.sub("", ini.get('artist', 'unk'))
     charter = DETAG.sub("", ini.get('charter', 'unk'))
-    diff = ini.get('diff_guitar', '-1')
     icon = ini.get('icon', '')
+
+    # one difficulty value per instrument, keyed the same way as everywhere else
+    # (instrument key, not the raw ini tag name) - '-1' default matches prior single-tag behavior
+    difficulties = {
+        instrument_key: ini.get(diff_tag, '-1')
+        for instrument_key, diff_tag in instruments.DIFF_TAGS.items()
+    }
 
     # determine source and mark as official or not
     release, official = "Custom", False
@@ -125,7 +135,7 @@ def ini_parse(file):
         'Name': name,
         'Artist': artist,
         'Charter': charter,
-        'Difficulty': diff,
+        'Difficulty': difficulties,
         'Release': release,
         'Official': official,
         'MultiplierNote': mult_note,

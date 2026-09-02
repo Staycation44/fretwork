@@ -1,9 +1,9 @@
 """
-ANALYZE - Loads the cache for config.HEADER & computes density metrics + difficulty values
-using restore skips the calculations/CSV generation and only edits inis to backed up values
+ANALYZE - Loads the cache for config.HEADER & computes density metrics + difficulty values for every instrument present in the cache
+Using Restore skips the calculations/workbook generation and only restores song.inis to backed up values
 
-pairs cache and metrics together
-    FullTest_cache_08052026-0330.pkl  ->  FullTest_metrics_08052026-0330.csv
+pairs cache and workbook together
+    FullTest_cache_08052026-0330.pkl  ->  FullTest_metrics_08052026-0330.xlsx
 
     python analyze.py
     python analyze.py --header FullTest
@@ -11,13 +11,15 @@ pairs cache and metrics together
     python analyze.py --diff-mode CalcTier
     python analyze.py --diff-mode Restore
 
-CSV contains: 
-retrieval code (for render visualization)
-timestamp of generation
-song.ini metadata (name/artist/charter/difficulty/release) 
-forumla difficulty metrics (duration, NPS/VPS metrics, D, remapped & calculated tier)
+Output is a single .xlsx workbook, one tab per instrument that has data in the cache.
 
-Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values
+Each instrument tab contains:
+- retrieval code (song + instrument, for render visualization)
+-timestamp of generation
+- song.ini metadata (name/artist/charter/difficulty/release)
+- formula difficulty metrics (duration, NPS/VPS metrics, D, remapped & calculated tiers)
+
+Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
 """
 import argparse
 import pathlib
@@ -26,22 +28,32 @@ import pandas as pd
 import tqdm
 
 import config
+from functions import instruments
 from functions import cache as cache_mod
 from functions import density, formula, ini_updater
 
 LEAD_COLS = ['Code', 'CacheGeneratedAt']
 
-def song_row(entry, gen_on):
-    metrics = density.calc_metrics(entry['notes'])
+def song_row(code, meta, inst_entry, gen_on, instrument_key):
+    metrics = density.calc_metrics(inst_entry['notes'])
     if metrics is None:
         return None
 
-    difficulty = formula.calc_diff(metrics)
+    difficulty = formula.calc_diff(metrics, instrument_key)
+
+    row_meta = {
+        'Name': meta.get('Name'),
+        'Artist': meta.get('Artist'),
+        'Charter': meta.get('Charter'),
+        'Difficulty': (meta.get('Difficulty') or {}).get(instrument_key, '-1'),
+        'Release': meta.get('Release'),
+        'Official': meta.get('Official'),
+    }
 
     return {
-        'Code': entry['code'],
+        'Code': code,
         'CacheGeneratedAt': gen_on,
-        **entry['meta'],
+        **row_meta,
         **metrics,
         **difficulty,
     }
@@ -51,6 +63,10 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     header = header or config.HEADER
     diff_mode = diff_mode if diff_mode is not None else config.DIFF_WRITE_MODE
 
+    if diff_mode == "Restore":
+        result = ini_updater.sync_difficulty("Restore", header, config.CACHE_DIR)
+        return result
+
     if cache is None:
         if cache_path is None:
             cache_path = config.latest_output('cache', header, out_dir, ext='pkl')
@@ -58,45 +74,73 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
     gen_on = cache.get('generated_at', 'unknown')
 
-    rows = []
-    difficulties = {}
+    rows_by_instrument = {key: [] for key in instruments.INSTRUMENT_KEYS}
+    difficulties_by_instrument = {key: {} for key in instruments.INSTRUMENT_KEYS}
+    total = 0
     skipped = 0
 
-    for entry in tqdm.tqdm(cache['songs'].values(), desc="Computing metrics", unit="song"):
-        row = song_row(entry, gen_on)
+    all_inst_entries = [
+        (song_path, instrument_key, inst_entry)
+        for song_path, song in cache['songs'].items()
+        for instrument_key, inst_entry in song.get('instruments', {}).items()
+    ]
+
+    for song_path, instrument_key, inst_entry in tqdm.tqdm(
+        all_inst_entries, desc="Computing metrics", unit="song"
+    ):
+        total += 1
+        song = cache['songs'][song_path]
+        code = song.get('codes', {}).get(instrument_key)
+
+        row = song_row(code, song['meta'], inst_entry, gen_on, instrument_key)
         if row is None:
             skipped += 1
             continue
-        rows.append(row)
+
+        rows_by_instrument[instrument_key].append(row)
         if diff_mode in ("CalcTier", "RemapDiff"):
-            difficulties[entry['song_path']] = {k: row[k] for k in ('CalcTier', 'RemapDiff')}
+            difficulties_by_instrument[instrument_key][song_path] = {
+                k: row[k] for k in ('CalcTier', 'RemapDiff')
+            }
 
-    # song.ini write-back happens after metrics are computed for every song,
-    # not interleaved mid-loop, and is a no-op when diff_mode is None (default)
-    if diff_mode is not None:
-        ini_updater.sync_difficulty(
-            diff_mode, header, config.CACHE_DIR,
-            songs=difficulties.keys(), difficulties=difficulties,
-        )
-
-    df = pd.DataFrame(rows)
-
-    ordered = LEAD_COLS + [c for c in df.columns if c not in LEAD_COLS]
-    df = df[ordered]
-
-    # Round floats for readability
-    df = df.round(2)
+    # song.ini write-back happens after metrics are computed for every song
+    if diff_mode in ("CalcTier", "RemapDiff"):
+        for instrument_key in instruments.INSTRUMENT_KEYS:
+            diffs = difficulties_by_instrument[instrument_key]
+            if not diffs:
+                continue
+            ini_updater.sync_difficulty(
+                diff_mode, header, config.CACHE_DIR, instrument=instrument_key,
+                songs=diffs.keys(), difficulties=diffs,
+            )
 
     ts = config.ext_ts(cache_path, 'cache', header) if cache_path else None
-    csv_out = config.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='csv')
-    df.to_csv(csv_out, index=False)
+    xlsx_out = config.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
 
-    print(f"\nRows written:        {len(rows)}")
-    print(f"Skipped (no notes):  {skipped}")
-    print(f"Cache generated:     {gen_on}")
-    print(f"CSV written:         {pathlib.Path(csv_out).resolve()}")
+    frames = {}
+    with pd.ExcelWriter(xlsx_out, engine='openpyxl') as writer:
+        for instrument_key in instruments.INSTRUMENT_KEYS:
+            rows = rows_by_instrument[instrument_key]
+            if not rows:
+                continue
+            df = pd.DataFrame(rows)
+            ordered = LEAD_COLS + [c for c in df.columns if c not in LEAD_COLS]
+            df = df[ordered].round(2)
+            sheet_name = instruments.DISPLAY_NAMES[instrument_key][:31]  # Excel sheet-name limit
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            frames[instrument_key] = df
 
-    return df
+    print(f"\nSong+instrument rows: {total}")
+    print(f"Skipped (no notes):   {skipped}")
+    print(f"Cache generated:      {gen_on}")
+    print("\nRows per instrument sheet:")
+    for instrument_key in instruments.INSTRUMENT_KEYS:
+        n = len(rows_by_instrument[instrument_key])
+        if n:
+            print(f"  {instruments.DISPLAY_NAMES[instrument_key]:<14} {n}")
+    print(f"\nWorkbook written: {pathlib.Path(xlsx_out).resolve()}")
+
+    return frames
 
 
 def main():
@@ -104,8 +148,9 @@ def main():
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")
     parser.add_argument('--diff-mode', default=None, choices=list(ini_updater.VALID_MODES),
-                         help="Write CalcTier/RemapDiff into song.ini, or Restore originals "
-                              "(default is None / no write-back, use config.DIFF_WRITE_MODE to override)")
+                         help="Write CalcTier/RemapDiff into each instrument's own diff_* tag, or "
+                              "Restore every instrument's originals from backup (skips metrics/"
+                              "workbook generation entirely). Default: config.DIFF_WRITE_MODE.")
     args = parser.parse_args()
 
     analyze(cache_path=args.cache, header=args.header, diff_mode=args.diff_mode)

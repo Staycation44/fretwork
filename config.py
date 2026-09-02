@@ -8,12 +8,12 @@ Outputs from build or analyze produces are named:
 A header of "FullTest" gives you:
     FullTest_cache_08052026-0330.pkl, - from Build
     FullTest_errors_08052026-0330.csv, - from Build (with errors)
-    FullTest_metrics_08052026-0330.csv, - from Analyze
-    FullTest_BackupData_08052026-0330.csv - from Build (original song.ini diff_guitar values)
+    FullTest_metrics_08052026-0330.xlsx, - from Analyze
+    FullTest_BackupData.csv - from Build
 
-changing the header here also defines the cache Analyze will calculate from or
-which cache Render will use for visualization retrieval codes (overridable with args)
-or which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
+changing the header here also defines the cache Analyze will calculate from 
+OR which cache Render will use for visualization retrieval codes (overridable with args)
+OR which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
 """
 
 import pathlib
@@ -34,9 +34,10 @@ HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 # ------------------------
 # DIFF_WRITE_MODE controls what ANALYZE does with the calculated difficulty:
 #    None        - don't touch song.ini at all (default)
-#   "CalcTier"   - write the continuous log-scaled tier to diff_guitar
-#   "RemapDiff"  - write the manual 0-6 remap to diff_guitar
-#   "Restore"    - restore every song.ini to backup value from BUILD
+#   "CalcTier"   - write the continuous log-scaled tier to each instrument's own diff_*
+#   "RemapDiff"  - writes the manual 0-6 remap instead to each instrument's own diff_*
+#   "Restore"    - restore every song.ini's diff_* tags (every instrument at once) to
+#                  the values backed up from BUILD
 #
 # Overridable per-run with --diff-mode on ANALYZE
 # Safest to leave this at None and use --diff-mode when you actually want to override

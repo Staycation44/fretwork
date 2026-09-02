@@ -22,6 +22,7 @@ from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 import config
+from functions import instruments
 
 AVG_CHAR_EM = 0.55
 
@@ -36,10 +37,12 @@ def _safe(text, limit=60):
     cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned[:limit] or 'unknown'
 
-# code + artist + song title
+# code + instrument + artist + song title
 def output_filename(entry):
     meta = entry.get('meta', {})
-    return f"{entry['code']}_{_safe(meta.get('Artist'))} - {_safe(meta.get('Name'))}.png"
+    instrument_label = instruments.DISPLAY_NAMES.get(entry.get('instrument'), '')
+    return (f"{entry['code']}_{_safe(instrument_label)}_"
+            f"{_safe(meta.get('Artist'))} - {_safe(meta.get('Name'))}.png")
 
 # Theme resolution
 def resolve_theme(profile):
@@ -63,20 +66,24 @@ def release_label(meta, limit=None):
     tag = 'official' if meta.get('Official') else 'custom'
     return f"{_ellipsize(release, limit)} ({tag})"
 
-# right side metatdata header - charter / release (tag) / file type / D / calc tier / remap bin
+# right side metatdata header - instrument / charter / release (tag) / file type / D / calc tier / remap bin
 def meta_header(entry, difficulty, profile, original_diff=None):
     meta = entry.get('meta', {})
+    instrument_key = entry.get('instrument')
+    instrument_label = instruments.DISPLAY_NAMES.get(instrument_key, '')
 
     bits = [
+        instrument_label,
         f"charter {_ellipsize(meta.get('Charter', 'unk'), profile.get('charter_limit'))}",
         release_label(meta, profile.get('release_limit')),
         str(entry.get('source_format', '?')),
     ]
 
-# meta.Difficulty is set from song.ini at last Build (usually official)
+# meta.Difficulty is a per-instrument dict set from song.ini at last Build (usually official)
     if difficulty is not None:
-        remap = difficulty.get('RemapDiff') 
-        diff_value = original_diff if original_diff is not None else meta.get('Difficulty', '-')
+        remap = difficulty.get('RemapDiff')
+        ini_diff = (meta.get('Difficulty') or {}).get(instrument_key, '-')
+        diff_value = original_diff if original_diff is not None else ini_diff
         bits.append(f"D {difficulty['D']:.2f}")
         bits.append(f"diff {diff_value}")
         bits.append(f"remap bin {remap if remap is not None else '-'}")
@@ -151,11 +158,11 @@ def _draw_spans(ax, spans, profile, solo_color):
                        linewidth=1, zorder=1)
 
 
-# render each song        
-#    entry: cached song entry
+# render each song
+#    entry: cache_mod.entries_by_code() result - a flattened song+instrument entry
 #    curves: output of functions.curves.compute_curves
 #    difficulty: optional dict from formula.compute_difficulty, for header
-#    original_diff: optional backed-up original diff_guitar, for header
+#    original_diff: optional backed-up original diff_* value for this instrument, for header
 #    profile: style dict + theme
 #    Returns the written path.
 def render_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):

@@ -1,28 +1,37 @@
 """
-MID_PARSER - Parses notes.mid files into the same note stream shape produced by chart_parser:
+MID_PARSER - Parses notes.mid files into per-instrument note streams:
     {
         'song_path': str,
         'source_format': 'mid',
         'resolution': int,
-        'notes': {
-            'time_ms': np.ndarray,   # sorted, one entry per tick
-            'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
+        'instruments': {
+            instrument_key: {
+                'notes': {
+                    'time_ms': np.ndarray,   # sorted, one entry per tick
+                    'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
+                },
+                'spans': {
+                    'star_power': [(start_ms, end_ms), ...],
+                    'solo':       [(start_ms, end_ms), ...],
+                },
+                'dropped': {counter_name: int, ...},
+            },
+            ...  # one entry per recognized instrument track actually present in the file
         },
-        'spans': {
-            'star_power': [(start_ms, end_ms), ...],
-            'solo':       [(start_ms, end_ms), ...],
-        },
-        'dropped': {counter_name: int, ...},
     }
 
-Scope is Expert difficulty only, matching chart_parser
+Scope is Expert difficulty only, across every recognized 5-fret instrument track found in
+the file (see instruments.py for the full track-name mapping). The file is opened and
+tempo-mapped exactly once regardless of how many instrument tracks it contains - only the
+per-track note/phrase scan repeats, and that scan is cheap relative to the MidiFile load.
 
 NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
 
 STAR POWER / SOLO
     Modern charts: pitch 116 = star power, pitch 103 = solo.
     Older charts:  pitch 103 = star power, no solo track.
-    song.ini's multiplier_note / star_power_note tag is passed from build
+    song.ini's multiplier_note / star_power_note tag is file-wide - it disambiguates pitch
+    103 identically for every instrument track in a given .mid, not just guitar.
 
 SysEx-based open note (0x01) events are not implemented
 """
@@ -33,15 +42,14 @@ import mido
 import numpy as np
 import tqdm
 
+from functions import instruments
 from parsers.timing import map_cum, tick_to_ms
 
 # ---------------------------------------------------------------------
 # Mid-specific constants (Expert only)
 # ---------------------------------------------------------------------
-GUITAR_TRACK_NAMES = ['PART GUITAR', 'T1 GEMS']
-
-OPEN_MID = 7
 X_FRETS = {96: 0, 97: 1, 98: 2, 99: 3, 100: 4}  # pitch -> lane number
+OPEN_MID = 7
 X_OPEN_PIT = 95        # note-based open, requires ENHANCED_OPENS
 
 SP_PIT = 116             # modern star power phrase
@@ -85,30 +93,15 @@ def _is_note_off(msg):
     return msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0)
 
 
-def mid_notes(mid_source, multiplier_note=None):
-    mid = mido.MidiFile(str(mid_source), clip=True)
-    tick_res = mid.ticks_per_beat
+# Extracts one instrument's note stream from its located track
+# Shared scan logic across every 5-fret instrument
+# Returns None if the track has no usable Expert notes
+def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
+    allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
 
-    tempos, sorted_ticks, cum_ms = map_mid_tempo(mid)
-
-    def to_ms(tick):
-        return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
-
-    # locate guitar track
-    track_map = {t.name.strip(): t for t in mid.tracks if t.name}
-    guitar_track = None
-    for name in GUITAR_TRACK_NAMES:
-        if name in track_map:
-            guitar_track = track_map[name]
-            break
-
-    if guitar_track is None:
-        raise ValueError(f"No guitar track found. Available tracks: {list(track_map.keys())}")
-
-    # check for [ENHANCED_OPENS] text event anywhere in the track
-    enhanced_opens = any(
+    enhanced_opens = allow_opens and any(
         msg.type == 'text' and ENH_OPEN in msg.text.upper()
-        for msg in guitar_track
+        for msg in track
     )
 
     # star power / solo pitch assignment
@@ -132,7 +125,7 @@ def mid_notes(mid_source, multiplier_note=None):
     open_starts = {}
     abs_tick = 0
 
-    for msg in guitar_track:
+    for msg in track:
         abs_tick += msg.time
 
         if msg.type == 'note_on' and msg.velocity > 0:
@@ -140,9 +133,9 @@ def mid_notes(mid_source, multiplier_note=None):
 
             if pitch in X_FRETS:
                 lane = X_FRETS[pitch]
-            elif pitch == M_OPEN_PIT and msg.channel == M_OPEN_CNL:
+            elif allow_opens and pitch == M_OPEN_PIT and msg.channel == M_OPEN_CNL:
                 lane = OPEN_MID                      # legacy open
-            elif pitch == X_OPEN_PIT and enhanced_opens:
+            elif allow_opens and pitch == X_OPEN_PIT and enhanced_opens:
                 lane = OPEN_MID                      # note-based open
             else:
                 lane = None
@@ -173,14 +166,11 @@ def mid_notes(mid_source, multiplier_note=None):
             dropped['unclosed_solo'] += len(starts)
 
     if not masks_by_tick:
-        raise ValueError("No valid Expert note events found in guitar track")
+        return None
 
     ordered_ticks = sorted(masks_by_tick.keys())
 
     return {
-        'song_path': str(pathlib.Path(mid_source).parent.resolve()),
-        'source_format': 'mid',
-        'resolution': tick_res,
         'notes': {
             'time_ms': np.array([to_ms(t) for t in ordered_ticks]),
             'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
@@ -190,6 +180,46 @@ def mid_notes(mid_source, multiplier_note=None):
             'solo': solos,
         },
         'dropped': dropped,
+    }
+
+
+def mid_notes(mid_source, multiplier_note=None):
+    mid = mido.MidiFile(str(mid_source), clip=True)
+    tick_res = mid.ticks_per_beat
+
+    tempos, sorted_ticks, cum_ms = map_mid_tempo(mid)
+
+    def to_ms(tick):
+        return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
+
+    track_map = {t.name.strip(): t for t in mid.tracks if t.name}
+
+    instruments_out = {}
+    for instrument_key in instruments.INSTRUMENT_KEYS:
+        track = None
+        for name in instruments.MID_TRACK_NAMES[instrument_key]:
+            if name in track_map:
+                track = track_map[name]
+                break
+
+        if track is None:
+            continue  # this instrument's track just isn't in the file - not an error
+
+        stream = _extract_track(track, instrument_key, to_ms, multiplier_note)
+        if stream is not None:
+            instruments_out[instrument_key] = stream
+
+    if not instruments_out:
+        raise ValueError(
+            f"No recognized instrument track with Expert notes found. "
+            f"Available tracks: {list(track_map.keys())}"
+        )
+
+    return {
+        'song_path': str(pathlib.Path(mid_source).parent.resolve()),
+        'source_format': 'mid',
+        'resolution': tick_res,
+        'instruments': instruments_out,
     }
 
 

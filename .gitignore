@@ -4,3 +4,4 @@ caches/
 *.csv
 *.png
 *.csv#
+instrument_scan.py

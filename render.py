@@ -1,13 +1,14 @@
 """
 RENDER - one PNG per retrieval code based on settings in config + plot
 
-Takes codes from the ANALYZE CSV and writes an individual PNG for each
-A list of codes produces separate files
+Takes codes from the ANALYZE workbook and writes an individual PNG for each. 
+Codes are an 8-digit song hash plus a single-letter instrument suffix
+G for guitar, B for bass, K for keys
 
-    python render.py 04821993
-    python render.py 04821993 71620045 09933120
+    python render.py 04821993G
+    python render.py 04821993G 71620045B 09933120K
     python render.py --codes-file picks.txt
-    python render.py 04821993 --header FullTest
+    python render.py 04821993G --header FullTest
 
 With no --cache given, RENDER loads the most recently built cache for config.HEADER (or --header).
 
@@ -44,7 +45,7 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
 
     out_dir = out_dir or config.RENDER_DIR
 
-    # Original diffs from backup CSV for header
+    # Original diffs from backup CSV for header, per instrument
     # {} if no backup exists yet (old caches/metrics)
     original_diffs = ini_updater.load_backup_diffs(header, config.CACHE_DIR)
 
@@ -59,10 +60,12 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
         if with_difficulty:
             metrics = density.calc_metrics(entry['notes'])
             if metrics is not None:
-                difficulty = formula.calc_diff(metrics)
+                difficulty = formula.calc_diff(metrics, entry['instrument'])
+
+        original_diff = original_diffs.get(entry['song_path'], {}).get(entry['instrument'])
 
         written.append(plot.render_song(entry, song_curves, difficulty,
-                                         original_diff=original_diffs.get(entry['song_path']),
+                                         original_diff=original_diff,
                                          out_dir=out_dir))
 
     print(f"\nPNGs written: {len(written)}")
@@ -79,7 +82,7 @@ def _read_codes_file(path):
 
 def main():
     parser = argparse.ArgumentParser(description="Render curve views for one or more songs.")
-    parser.add_argument('codes', nargs='*', help="retrieval code(s) from the metrics CSV")
+    parser.add_argument('codes', nargs='*', help="retrieval code(s) from the metrics workbook, e.g. 04821993B")
     parser.add_argument('--codes-file', default=None, help="file with one code per line")
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")

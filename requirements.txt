@@ -3,3 +3,4 @@ numpy
 tqdm
 mido
 matplotlib
+openpyxl
