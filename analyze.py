@@ -29,8 +29,7 @@ from functions import density, formula, ini_updater, xlsx_format, timestamp
 
 COLUMN_ORDER = [
     'Code', 'Song Title', 'Artist', 'Type', 'Charter', 'Release', 'Official',
-    'NoteCount', 'DurationS',
-    'Difficulty', 'D', 'RemapDiff', 'CalcTier',
+    'NoteCount', 'DurationS', 'Difficulty', 'D', 'RemapDiff', 'CalcTier',
     'pNPS', 'aNPS', 'medNPS', 'stdNPS', 'pVPS', 'aVPS', 'medVPS', 'stdVPS',
     'N', 'V', 'COV',
 ]
@@ -86,6 +85,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         for instrument_key, inst_entry in song.get('instruments', {}).items()
     ]
 
+    print(f"\nAnalyzing {header} cache")
     for song_path, instrument_key, inst_entry in tqdm.tqdm(
         all_inst_entries, desc="Computing metrics", unit="song"
     ):
@@ -138,15 +138,19 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             xlsx_format.style_sheet(writer.sheets[sheet], df)
             frames[sheet_name] = df
 
-    print(f"\nSong+instrument rows: {total}")
-    print(f"Skipped (no notes):   {skipped}")
-    print(f"Cache generated:      {gen_on}")
-    print("\nRows per instrument:")
+
+    print(f"\n{header} analysis complete:")
+    print(  f"Cache version:  {gen_on}")
+    print(  f"Rows written:   {total}")
+
+    print(f"\nRows per instrument:")
     for instrument_key in instruments.INSTRUMENT_KEYS:
         n = len(rows_by_instrument[instrument_key])
         if n:
-            print(f"  {instruments.DISPLAY_NAMES[instrument_key]:<14} {n}")
-    print(f"\nWorkbook written: {pathlib.Path(xlsx_out).resolve()}")
+            print(f"    {instruments.DISPLAY_NAMES[instrument_key]:<14} {n}")
+
+    print(f"\nSpreadsheet written: {pathlib.Path(xlsx_out).resolve()}")
+    print()
 
     return frames
 

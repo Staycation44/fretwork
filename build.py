@@ -19,6 +19,7 @@ ini is parsed first on purpose - need to pass down tags for mid sp/solo
 
 import argparse
 import csv
+from email import header
 
 import config
 from functions import instruments, ini_updater, timestamp
@@ -52,7 +53,9 @@ def build_cache(search_path=None, header=None, out_dir=None):
     errors = []
     dropped_total = {}
 
-    print("Gathering song.ini metadata")
+
+    print(f"\nBuilding {header} cache")
+
     ini_df = ini_parser.ini_loop(search_path, errors)
     if ini_df.empty:
         raise ValueError(f"No parseable song.ini files found under {search_path}")
@@ -66,7 +69,6 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     note_index = build_note_index(search_path, mult_notes, errors)
 
-    print("Joining metadata")
     songs = {}
     no_instruments = 0
     instrument_counts = {key: 0 for key in instruments.INSTRUMENT_KEYS}
@@ -101,7 +103,6 @@ def build_cache(search_path=None, header=None, out_dir=None):
             'instruments': song_instruments,
         }
 
-    print("Backing up original difficulties")
     backed_up = ini_updater.backup_data(
         (
             (
@@ -116,7 +117,6 @@ def build_cache(search_path=None, header=None, out_dir=None):
         ),
         header, config.CACHE_DIR,
     )
-    print(f"New songs backed up: {backed_up}")
 
     # codes assigned per (song, instrument) present - see cache.assign_codes
     pairs = [
@@ -142,19 +142,22 @@ def build_cache(search_path=None, header=None, out_dir=None):
     cache_mod.save(built, cache_path)
 
     # terminal report
-    print(f"\nSongs with song.ini:     {len(ini_rows)}")
-    print(f"No recognized instrument: {no_instruments}")
-    print(f"Errors:                  {len(errors)}")
-    print(f"Cached successfully:     {len(songs)}")
-    print("\nSongs found per instrument:")
+    print(f"\n{header} cache complete:")
+    print(f"    Song.ini count        {len(ini_rows)}")
+    print(f"    No usable chart/mid   {no_instruments}")
+    print(f"    Errors                {len(errors)}")
+    print(f"    Diffs backed up       {backed_up}")
+    print(f"    Cached songs          {len(songs)}")
+    
+    print(f"\nSongs per instrument:")
     for instrument_key in instruments.INSTRUMENT_KEYS:
-        print(f"  {instruments.DISPLAY_NAMES[instrument_key]:<14} {instrument_counts[instrument_key]}")
+        print(f"    {instruments.DISPLAY_NAMES[instrument_key]:<14} {instrument_counts[instrument_key]}")
 
     if dropped_total:
-        print("\nDropped during parsing:")
+        print(f"\nDropped during parsing:")
         for key in sorted(dropped_total):
             if dropped_total[key]:
-                print(f"  {key}: {dropped_total[key]}")
+                print(f"    {key}: {dropped_total[key]}")
 
     if errors:
         errors_path = timestamp.output_path('errors', header, out_dir=out_dir, ext='csv')
@@ -164,8 +167,8 @@ def build_cache(search_path=None, header=None, out_dir=None):
             writer.writerows(errors)
         print(f"\nError detail: {errors_path.resolve()}")
 
-    print(f"Cache written:  {cache_path.resolve()}")
-    print(f"Generated:      {gen_on}")
+    print(f"\nCache written:  {cache_path.resolve()}")
+    print()
 
     return built
 

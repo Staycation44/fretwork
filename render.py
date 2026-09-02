@@ -38,9 +38,9 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
     entries, missing = cache_mod.entries_by_code(cache, codes)
 
     if missing:
-        print(f"No song for code(s): {', '.join(missing)}")
+        print(f"\nNo song for: {', '.join(missing)}")
     if not entries:
-        print("Nothing to render.")
+        print()
         return []
 
     out_dir = out_dir or config.RENDER_DIR
@@ -49,6 +49,7 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
     # {} if no backup exists yet (old caches/metrics)
     original_diffs = ini_updater.load_backup_diffs(header, config.CACHE_DIR)
 
+    print(f"\nRendering {len(entries)} from {header} cache")
     written = []
     for entry in tqdm.tqdm(entries, desc="Rendering", unit="song"):
         song_curves = curves_mod.calc_curves(entry['notes'])
@@ -68,9 +69,10 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
                                          original_diff=original_diff,
                                          out_dir=out_dir))
 
-    print(f"\nPNGs written: {len(written)}")
+    print(f"\nGraphs rendered: {len(written)}")
     if written:
-        print(f"Output dir:   {pathlib.Path(out_dir).resolve()}")
+        print(f"\nOutput: {pathlib.Path(out_dir).resolve()}")
+        print()
 
     return written
 
