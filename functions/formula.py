@@ -25,8 +25,19 @@ RemapDiff (0-6 bins) and CalcTier (log-scaled) ARE instrument-specific - TODO ca
 
 import math
 
+# ------------------------------------------------------------
+# Calibration groups - guitar/coop/rhythm share, bass & keys are separate
+# ------------------------------------------------------------
+CALIBRATION_GROUP = {
+    'guitar': 'guitar',
+    'coop':   'guitar',
+    'rhythm': 'guitar',
+    'bass':   'bass',
+    'keys':   'keys',
+}
+
 # ---------------------------------
-# Remap (0-6) params, per instrument
+# Remap (0-6) params, per group
 # ---------------------------------
 # based on general distribution from official GUITAR library across tiers by percentage:
 """
@@ -39,44 +50,36 @@ Tier    Official	remap
 5	    12.0%	    12.3%
 6	    6.2%	    6.4%
 """
-DIFF_LABELS = [0, 1, 2, 3, 4, 5, 6]   # shared label set, same for every instrument
+DIFF_LABELS = [0, 1, 2, 3, 4, 5, 6]   # shared label set
 
-GUITAR_REMAP_BINS = [0, 8, 14, 21, 29, 38, 55, math.inf]   # calibrated, see table above
+GUITAR_REMAP_BINS = [0, 8, 14, 21, 29, 38, 55, math.inf]   # calibrated, see table above; also covers coop/rhythm
 BASS_REMAP_BINS   = [0, 8, 14, 21, 29, 38, 55, math.inf]   # = guitar's - needs its own rebin
-COOP_REMAP_BINS   = [0, 8, 14, 21, 29, 38, 55, math.inf]   # = guitar's - may just inherit permanently
-RHYTHM_REMAP_BINS = [0, 8, 14, 21, 29, 38, 55, math.inf]   # = guitar's - may just inherit permanently
 KEYS_REMAP_BINS   = [0, 8, 14, 21, 29, 38, 55, math.inf]   # = guitar's - needs its own rebin
 
 REMAP_BINS = {
     'guitar': GUITAR_REMAP_BINS,
     'bass':   BASS_REMAP_BINS,
-    'coop':   COOP_REMAP_BINS,
-    'rhythm': RHYTHM_REMAP_BINS,
     'keys':   KEYS_REMAP_BINS,
 }
 
 # --------------------------------------------
-# CalcTier (log-scaled) params, per instrument
+# CalcTier (log-scaled) params, per group
 # --------------------------------------------
 # ~One tier per LN_INC of log(D / BASE_D).
-GUITAR_BASE_D, GUITAR_LN_INC = 7.6, 0.44   # calibrated
+GUITAR_BASE_D, GUITAR_LN_INC = 7.6, 0.44   # calibrated; also covers coop/rhythm
 BASS_BASE_D,   BASS_LN_INC   = 7.6, 0.44   # = guitar's - needs its own rebin
-COOP_BASE_D,   COOP_LN_INC   = 7.6, 0.44   # = guitar's - may just inherit permanently
-RHYTHM_BASE_D, RHYTHM_LN_INC = 7.6, 0.44   # = guitar's - may just inherit permanently
 KEYS_BASE_D,   KEYS_LN_INC   = 7.6, 0.44   # = guitar's - needs its own rebin
 
 CALCTIER_PARAMS = {
     'guitar': (GUITAR_BASE_D, GUITAR_LN_INC),
     'bass':   (BASS_BASE_D, BASS_LN_INC),
-    'coop':   (COOP_BASE_D, COOP_LN_INC),
-    'rhythm': (RHYTHM_BASE_D, RHYTHM_LN_INC),
     'keys':   (KEYS_BASE_D, KEYS_LN_INC),
 }
 
 
 # RB manual 0-6 fit
 def remap_diff(D, instrument='guitar'):
-    bin_edges = REMAP_BINS[instrument]
+    bin_edges = REMAP_BINS[CALIBRATION_GROUP[instrument]]
     lower = bin_edges[0]
     for label, upper in zip(DIFF_LABELS, bin_edges[1:]):
         if lower < D <= upper:
@@ -86,7 +89,7 @@ def remap_diff(D, instrument='guitar'):
 
 # log tier calculation
 def calc_tier(D, instrument='guitar'):
-    base_d, ln_inc = CALCTIER_PARAMS[instrument]
+    base_d, ln_inc = CALCTIER_PARAMS[CALIBRATION_GROUP[instrument]]
     if D < base_d:
         return 0
     return int(math.floor(math.log(D / base_d) / ln_inc) + 1)

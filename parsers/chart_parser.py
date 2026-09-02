@@ -214,8 +214,12 @@ def chart_notes(chart_source):
 
     instruments_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
-        section_name = instruments.CHART_SECTIONS[instrument_key]
-        section = c_dict.get(section_name)
+        section = None
+        for section_name in instruments.CHART_SECTIONS[instrument_key]:
+            section = c_dict.get(section_name)
+            if section:
+                break
+
         if not section:
             continue  # this instrument's section just isn't in the file - not an error
 

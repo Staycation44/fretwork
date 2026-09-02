@@ -12,12 +12,7 @@ strings, so adding/renaming an instrument later is a one-file change.
 
 Track/section names sourced from TheNathannator's GuitarGame_ChartFormats documentation
 
-NOT SUPPORTED (deliberately):
-    notes.chart's legacy 'SingleBass' difficulty section (GH3 / GH:TCP era). Its exact
-    relationship to the modern 'DoubleBass' section isn't well documented and it's largely
-    unsupported in the wider charting ecosystem. A chart with only a legacy SingleBass
-    section and no DoubleBass section is treated the same as having no bass track at all -
-    see the note at CHART_SECTIONS and in chart_parser.py where bass is recognized.
+LEGACY FALLBACK: notes.chart's legacy 'SingleBass' is a fallback for bass when the modern 'DoubleBass' section is missing
 """
 
 # canonical instrument keys, in a stable display/iteration order
@@ -31,8 +26,8 @@ DISPLAY_NAMES = {
     'keys':   'Keys',
 }
 
-# .mid track name(s) per instrument. Guitar carries the GH1-era 'T1 GEMS' alt-name; none
-# of the others have a comparable legacy name to fall back on.
+# .mid track name(s) per instrument
+# Guitar carries the GH1-era 'T1 GEMS' legacy fallback
 MID_TRACK_NAMES = {
     'guitar': ['PART GUITAR', 'T1 GEMS'],
     'coop':   ['PART GUITAR COOP'],
@@ -41,14 +36,14 @@ MID_TRACK_NAMES = {
     'keys':   ['PART KEYS'],
 }
 
-# .chart difficulty-section name per instrument (Expert only, matching the rest of this
-# project's scope). 'SingleBass' is intentionally excluded - see module docstring.
+# .chart difficulty-section name(s) per instrument 
+# Bass carries the 'SingleBass' legacy fallback
 CHART_SECTIONS = {
-    'guitar': 'ExpertSingle',
-    'coop':   'ExpertDoubleGuitar',
-    'rhythm': 'ExpertDoubleRhythm',
-    'bass':   'ExpertDoubleBass',
-    'keys':   'ExpertKeyboard',
+    'guitar': ['ExpertSingle'],
+    'coop':   ['ExpertDoubleGuitar'],
+    'rhythm': ['ExpertDoubleRhythm'],
+    'bass':   ['ExpertDoubleBass', 'ExpertSingleBass'],
+    'keys':   ['ExpertKeyboard'],
 }
 
 # song.ini difficulty tag per instrument
@@ -60,7 +55,7 @@ DIFF_TAGS = {
     'keys':   'diff_keys',
 }
 
-# single-letter suffix appended to the 8-digit song hash to form a retrieval code,
+# single-letter suffix appended to 8-digit song hash for retrieval code,
 # e.g. song code '04821993' + bass -> '04821993B'
 CODE_SUFFIX = {
     'guitar': 'G',
@@ -79,4 +74,20 @@ SUPPORTS_OPEN_NOTES = {
     'rhythm': True,
     'bass':   True,
     'keys':   False,
+}
+
+# analyze.py xlsx tab grouping.
+SHEET_GROUPS = {
+    'Guitar': ['guitar', 'coop', 'rhythm'],
+    'Bass':   ['bass'],
+    'Keys':   ['keys'],
+}
+
+# per-row label for 'Type' column
+TYPE_LABELS = {
+    'guitar': 'Lead',
+    'coop':   'Co-op',
+    'rhythm': 'Rhythm',
+    'bass':   'Bass',
+    'keys':   'Keys',
 }

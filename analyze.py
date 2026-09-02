@@ -11,12 +11,11 @@ pairs cache and workbook together
     python analyze.py --diff-mode CalcTier
     python analyze.py --diff-mode Restore
 
-Output is a single .xlsx workbook, one tab per instrument that has data in the cache.
+Output is a single .xlsx workbook, one tab per instrument group that has data in the cache
 
-Each instrument tab contains:
+Each tab contains:
 - retrieval code (song + instrument, for render visualization)
--timestamp of generation
-- song.ini metadata (name/artist/charter/difficulty/release)
+- song.ini metadata (name/artist/charter/type/difficulty/release)
 - formula difficulty metrics (duration, NPS/VPS metrics, D, remapped & calculated tiers)
 
 Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
@@ -32,9 +31,9 @@ from functions import instruments
 from functions import cache as cache_mod
 from functions import density, formula, ini_updater
 
-LEAD_COLS = ['Code', 'CacheGeneratedAt']
+LEAD_COLS = ['Code', 'Name', 'Artist', 'Charter', 'Type', 'Difficulty', 'Release', 'Official']
 
-def song_row(code, meta, inst_entry, gen_on, instrument_key):
+def song_row(code, meta, inst_entry, instrument_key):
     metrics = density.calc_metrics(inst_entry['notes'])
     if metrics is None:
         return None
@@ -45,6 +44,7 @@ def song_row(code, meta, inst_entry, gen_on, instrument_key):
         'Name': meta.get('Name'),
         'Artist': meta.get('Artist'),
         'Charter': meta.get('Charter'),
+        'Type': instruments.TYPE_LABELS[instrument_key],
         'Difficulty': (meta.get('Difficulty') or {}).get(instrument_key, '-1'),
         'Release': meta.get('Release'),
         'Official': meta.get('Official'),
@@ -52,7 +52,6 @@ def song_row(code, meta, inst_entry, gen_on, instrument_key):
 
     return {
         'Code': code,
-        'CacheGeneratedAt': gen_on,
         **row_meta,
         **metrics,
         **difficulty,
@@ -92,7 +91,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         song = cache['songs'][song_path]
         code = song.get('codes', {}).get(instrument_key)
 
-        row = song_row(code, song['meta'], inst_entry, gen_on, instrument_key)
+        row = song_row(code, song['meta'], inst_entry, instrument_key)
         if row is None:
             skipped += 1
             continue
@@ -119,21 +118,21 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
     frames = {}
     with pd.ExcelWriter(xlsx_out, engine='openpyxl') as writer:
-        for instrument_key in instruments.INSTRUMENT_KEYS:
-            rows = rows_by_instrument[instrument_key]
+        for sheet_name, group_keys in instruments.SHEET_GROUPS.items():
+            rows = [row for instrument_key in group_keys for row in rows_by_instrument[instrument_key]]
             if not rows:
                 continue
             df = pd.DataFrame(rows)
             ordered = LEAD_COLS + [c for c in df.columns if c not in LEAD_COLS]
             df = df[ordered].round(2)
-            sheet_name = instruments.DISPLAY_NAMES[instrument_key][:31]  # Excel sheet-name limit
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-            frames[instrument_key] = df
+            df = df.sort_values('D', ascending=False)
+            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)  # Excel sheet-name limit
+            frames[sheet_name] = df
 
     print(f"\nSong+instrument rows: {total}")
     print(f"Skipped (no notes):   {skipped}")
     print(f"Cache generated:      {gen_on}")
-    print("\nRows per instrument sheet:")
+    print("\nRows per instrument:")
     for instrument_key in instruments.INSTRUMENT_KEYS:
         n = len(rows_by_instrument[instrument_key])
         if n:
