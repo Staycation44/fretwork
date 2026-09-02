@@ -2,15 +2,12 @@
 INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instrument:
 
 - update_ini_value() / get_ini_value(): read or patch one key in [song]
-- backup_data(): backs up each song's original diff_* values the first time it's seen
-  (during BUILD) - one row per song, one column per instrument's diff tag
-- restore_from_backup(): restores every diff_* tag present in the backup back to its original value for every instrument
+- backup_data(): backs up each song's original diff_* values the first time it's seen (BUILD)
+- restore_from_backup(): restores every diff_* tag present in the backup back to its original (every instrument)
 - sync_difficulty(): ANALYZE decision, driven by config.DIFF_WRITE_MODE (or --diff-mode) to:
     write CalcTier/RemapDiff into song.ini's diff_<instrument> tag for one instrument's mode
     OR run restore_from_backup() when mode is "Restore" (restores every instrument at once)
     OR do nothing when mode is None
-
-Analyze runs all instruments, so sync_difficulty is called once per instrument tab
 
 Restore calls restore_from_backup() directly and skips metrics/workbook generation
 

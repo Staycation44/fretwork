@@ -1,7 +1,7 @@
 """
 CONFIG - Where to look for songs, what to name outputs - render colors and some other settings
  
-HEADER is a run identifier (based on a library folder) 
+HEADER is the run identifier (based on a library folder) 
 Outputs from build or analyze produces are named:
     {header}_{kind}_{timestamp}.{ext}
 
@@ -9,15 +9,12 @@ A header of "FullTest" gives you:
     FullTest_cache_08052026-0330.pkl, - from Build
     FullTest_errors_08052026-0330.csv, - from Build (with errors)
     FullTest_metrics_08052026-0330.xlsx, - from Analyze
-    FullTest_BackupData.csv - from Build
+    FullTest_BackupData.csv - from Build (for difficulty editing)
 
 changing the header here also defines the cache Analyze will calculate from 
-OR which cache Render will use for visualization retrieval codes (overridable with args)
-OR which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
+AND which cache Render will use for visualization retrieval codes (overridable with args)
+AND which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
 """
-
-import pathlib
-from datetime import datetime
 
 # ------
 # Paths - EDIT THESE FIRST BEFORE RUNNING ANYTHING
@@ -26,8 +23,9 @@ from datetime import datetime
 # Library to scan. set here or override on the command line with --search-path.
 SEARCH_PATH = r"C:\Users\user\Documents\Clone Hero\Songs" # edit to your library path before running Build
 
-# Identifies this run. Overridable with --header.
+# Identifies the run. Overridable with --header.
 HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
+
 
 # ------------------------
 # song.ini difficulty write-back - OPTIONAL, off by default (DON'T EDIT UNLESS YOU KNOW WHAT YOU'RE DOING)
@@ -44,6 +42,9 @@ HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 
 DIFF_WRITE_MODE = "None" # None | "CalcTier" | "RemapDiff" | "Restore"
 
+
+
+
 #------------------------------
 # RENDER output directory - DON'T NEED TO EDIT, these dump to the tool's folder
 #------------------------------
@@ -59,9 +60,6 @@ KIND_DIRS = {
     'errors': CACHE_DIR,
     'metrics': METRICS_DIR,
 }
-
-
-
 
 # ----------------
 # Render settings - Edit to select theme, change colors, etc
@@ -116,55 +114,3 @@ RENDER_DEFAULT = {
     "show_solo_spans": True,
     "show_star_power_spans": False,
 }
-
-# --------------------------
-# Timestamped output naming - DON'T EDIT - these are to untangle cache files...
-# --------------------------
-
-# Short generation stamp: MMDDYYYY-HHMM
-def timestamp():
-    return datetime.now().strftime("%m%d%Y-%H%M")
-
-# determine where to put files (render already does this on it's own)
-def _resolve_out_dir(kind, out_dir):
-    if out_dir is not None:
-        return pathlib.Path(out_dir)
-    return pathlib.Path(OUTPUT_DIR) / KIND_DIRS.get(kind, '')
-
-# {header}_{kind}_{timestamp}.{ext}
-def output_path(kind, header=None, ts=None, ext='csv', out_dir=None):
-    header = header or globals()['HEADER']
-    ts = ts or timestamp()
-    out_dir = _resolve_out_dir(kind, out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir / f"{header}_{kind}_{ts}.{ext}"
-
-TS_FORMAT = "%m%d%Y-%H%M"
-
-def file_ts(path, kind, header):
-    try:
-        ts = ext_ts(path, kind, header)
-        return datetime.strptime(ts, TS_FORMAT)
-    except ValueError:
-        return datetime.min
-
-
-def latest_output(kind, header=None, out_dir=None, ext='pkl'):
-    header = header or globals()['HEADER']
-    out_dir = _resolve_out_dir(kind, out_dir)
-    matches = list(out_dir.glob(f"{header}_{kind}_*.{ext}"))
-    if not matches:
-        raise FileNotFoundError(
-            f"No {kind} file for header '{header}' in {out_dir} "
-            f"(looked for {header}_{kind}_*.{ext})"
-        )
-    return max(matches, key=lambda p: file_ts(p, kind, header))
-
-
-def ext_ts(path, kind, header=None):
-    header = header or globals()['HEADER']
-    stem = pathlib.Path(path).stem
-    prefix = f"{header}_{kind}_"
-    if not stem.startswith(prefix):
-        raise ValueError(f"{path} doesn't match expected pattern {prefix}<timestamp>")
-    return stem[len(prefix):]

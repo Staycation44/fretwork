@@ -23,7 +23,7 @@ import tqdm
 import config
 from functions import cache as cache_mod
 from functions import curves as curves_mod
-from functions import density, formula, ini_updater, plot
+from functions import density, formula, ini_updater, plot, timestamp
 
 
 def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
@@ -32,7 +32,7 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
 
     if cache is None:
         if cache_path is None:
-            cache_path = config.latest_output('cache', header, ext='pkl')
+            cache_path = timestamp.latest_output('cache', header, ext='pkl')
         cache = cache_mod.load(cache_path)
 
     entries, missing = cache_mod.entries_by_code(cache, codes)

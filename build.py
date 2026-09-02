@@ -21,10 +21,9 @@ import argparse
 import csv
 
 import config
-from functions import instruments
-from parsers import chart_parser, ini_parser, mid_parser
+from functions import instruments, ini_updater, timestamp
+from parsers import chart_parser, ini_parser, mid_parser 
 from functions import cache as cache_mod
-from functions import ini_updater
 
 # The ini columns that survive to the metrics workbook, aside from per-instrument Difficulty
 META_KEYS = ('Name', 'Artist', 'Charter', 'Release', 'Official')
@@ -139,7 +138,7 @@ def build_cache(search_path=None, header=None, out_dir=None):
         'dropped': dropped_total,
     }
 
-    cache_path = config.output_path('cache', header, out_dir=out_dir, ext='pkl')
+    cache_path = timestamp.output_path('cache', header, out_dir=out_dir, ext='pkl')
     cache_mod.save(built, cache_path)
 
     # terminal report
@@ -158,7 +157,7 @@ def build_cache(search_path=None, header=None, out_dir=None):
                 print(f"  {key}: {dropped_total[key]}")
 
     if errors:
-        errors_path = config.output_path('errors', header, out_dir=out_dir, ext='csv')
+        errors_path = timestamp.output_path('errors', header, out_dir=out_dir, ext='csv')
         with open(errors_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['path', 'error', 'message'])

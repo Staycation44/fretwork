@@ -12,11 +12,7 @@ pairs cache and workbook together
     python analyze.py --diff-mode Restore
 
 Output is a single .xlsx workbook, one tab per instrument group that has data in the cache
-
-Each tab contains:
-- retrieval code (song + instrument, for render visualization)
-- song.ini metadata (name/artist/charter/type/difficulty/release)
-- formula difficulty metrics (duration, NPS/VPS metrics, D, remapped & calculated tiers)
+Formatted via xlsx_format.py
 
 Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
 """
@@ -29,9 +25,19 @@ import tqdm
 import config
 from functions import instruments
 from functions import cache as cache_mod
-from functions import density, formula, ini_updater
+from functions import density, formula, ini_updater, xlsx_format, timestamp
 
-LEAD_COLS = ['Code', 'Name', 'Artist', 'Charter', 'Type', 'Difficulty', 'Release', 'Official']
+# song.ini's 'Name' tag is displayed as 'Song Title' in the workbook - renamed at
+# output time only; internal dict/DataFrame keys before that point stay 'Name' to match
+# ini_parser/build.py.
+COLUMN_ORDER = [
+    'Code', 'Song Title', 'Artist', 'Type', 'Charter', 'Release', 'Official',
+    'NoteCount', 'DurationS',
+    'Difficulty', 'D', 'RemapDiff', 'CalcTier',
+    'pNPS', 'aNPS', 'medNPS', 'stdNPS', 'pVPS', 'aVPS', 'medVPS', 'stdVPS',
+    'N', 'V', 'COV',
+]
+
 
 def song_row(code, meta, inst_entry, instrument_key):
     metrics = density.calc_metrics(inst_entry['notes'])
@@ -68,7 +74,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
     if cache is None:
         if cache_path is None:
-            cache_path = config.latest_output('cache', header, out_dir, ext='pkl')
+            cache_path = timestamp.latest_output('cache', header, out_dir, ext='pkl')
         cache = cache_mod.load(cache_path)
 
     gen_on = cache.get('generated_at', 'unknown')
@@ -113,8 +119,8 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                 songs=diffs.keys(), difficulties=diffs,
             )
 
-    ts = config.ext_ts(cache_path, 'cache', header) if cache_path else None
-    xlsx_out = config.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
+    ts = timestamp.ext_ts(cache_path, 'cache', header) if cache_path else None
+    xlsx_out = timestamp.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
 
     frames = {}
     with pd.ExcelWriter(xlsx_out, engine='openpyxl') as writer:
@@ -123,10 +129,19 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             if not rows:
                 continue
             df = pd.DataFrame(rows)
-            ordered = LEAD_COLS + [c for c in df.columns if c not in LEAD_COLS]
-            df = df[ordered].round(2)
+            df = df.rename(columns={'Name': 'Song Title'})
+
+            # Difficulty comes off song.ini as a string ('-1' default, or whatever the
+            # charter wrote) - coerce to numeric so both the -1 white-sentinel check and
+            # the pastel color scale in xlsx_format read real numbers, not text.
+            df['Difficulty'] = pd.to_numeric(df['Difficulty'], errors='coerce').fillna(-1).astype(int)
+
+            df = df[COLUMN_ORDER].round(2)
             df = df.sort_values('D', ascending=False)
-            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)  # Excel sheet-name limit
+
+            sheet = sheet_name[:31]  # Excel sheet-name limit
+            df.to_excel(writer, sheet_name=sheet, index=False)
+            xlsx_format.style_sheet(writer.sheets[sheet], df)
             frames[sheet_name] = df
 
     print(f"\nSong+instrument rows: {total}")
