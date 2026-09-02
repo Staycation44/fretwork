@@ -5,3 +5,5 @@ caches/
 *.png
 *.csv#
 instrument_scan.py
+*.xlsx
+*.xlsx#
