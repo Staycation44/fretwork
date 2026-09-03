@@ -227,7 +227,7 @@ def sync_difficulty(mode, header, cache_dir, instrument=None, songs=None, diffic
 
     if mode == "Restore":
         restored, failed = restore_from_backup(header, cache_dir)
-        print(f"Restored {restored} song.ini file(s) from backup" +
+        print(f"Restored {restored} song.inis from backup" +
               (f", {len(failed)} failed" if failed else ""))
         return {"mode": mode, "restored": restored, "failed": failed}
 
@@ -245,6 +245,6 @@ def sync_difficulty(mode, header, cache_dir, instrument=None, songs=None, diffic
         except Exception as exc:
             failed.append((song_path, type(exc).__name__, str(exc)))
 
-    print(f"Applied {mode} to {applied} song.ini file(s) [{instrument}]" +
+    print(f"Applied {mode} to {applied} song.inis [{instrument}]" +
           (f", {len(failed)} failed" if failed else ""))
     return {"mode": mode, "instrument": instrument, "applied": applied, "failed": failed}

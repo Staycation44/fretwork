@@ -14,3 +14,5 @@ lrbdlc = Lego Rock Band DLC
 gdrb = Green Day Rock Band
 gdrbdlc = Green Day Rock Band DLC
 rbb = Rock Band Blitz
+tbrb = The Beatles: Rock Band
+tbrbdlc = The Beatles: Rock Band DLC
