@@ -18,14 +18,9 @@ To use the tool setup **config** and run these in order:
 3. **Render** - Output a PNG graph of metrics over time for one or more song/instrument combos based on a retrieval code from the spreadsheet
 
 ## Index
-- [Fretwork v0.7 - Expert 5-Fret Difficulty Analyzer](#fretwork-v07---expert-5-fret-difficulty-analyzer)
-  - [Using Fretwork](#using-fretwork)
-  - [Index](#index)
   - [1. Setup: `config.py`](#1-setup-configpy)
-    - [Render appearance settings](#render-appearance-settings)
   - [2. Building a cache](#2-building-a-cache)
   - [3. Analyzing a cache](#3-analyzing-a-cache)
-      - [5-Fret D Formula](#5-fret-d-formula)
   - [4. Rendering song graphs](#4-rendering-song-graphs)
   - [5. Fixes/Extension Ideas](#5-fixesextension-ideas)
   - [License](#license)
