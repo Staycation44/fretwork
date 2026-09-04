@@ -20,7 +20,7 @@ epsilon prevents median values of 0 from collapsing D while still being derived 
 D/N/V/COV are computed identically regardless of instrument - purely a function of the note
 stream's density/variability shape, nothing instrument-specific in the math itself.
 
-RemapDiff (0-6 bins) and CalcTier (log-scaled) ARE instrument-specific - TODO calibration for each
+RemapDiff (0-6 bins) and CalcTier (log-scaled) are instrument-specific
 """
 
 import math
@@ -39,8 +39,10 @@ CALIBRATION_GROUP = {
 # ---------------------------------
 # Remap (0-6) params, per group
 # ---------------------------------
-# based on general distribution from official GUITAR library across tiers by percentage:
+DIFF_LABELS = [0, 1, 2, 3, 4, 5, 6]   # shared label set
+
 """
+GUITAR REMAP BINS (diff_guitar distribution)
 Tier    Official	remap
 0	    4.3%	    4.3%
 1	    10.6%	    11.2%
@@ -50,11 +52,33 @@ Tier    Official	remap
 5	    12.0%	    12.3%
 6	    6.2%	    6.4%
 """
-DIFF_LABELS = [0, 1, 2, 3, 4, 5, 6]   # shared label set
+GUITAR_REMAP_BINS = [0, 8, 14, 21, 29, 38, 55, math.inf]   # calibrated vs diff_guitar tag distribution (incl coop/rhythm)
 
-GUITAR_REMAP_BINS = [0, 8, 14, 21, 29, 38, 55, math.inf]   # calibrated, see table above; also covers coop/rhythm
-BASS_REMAP_BINS   = [0, 8, 14, 21, 29, 38, 55, math.inf]   # = guitar's - needs its own rebin
-KEYS_REMAP_BINS   = [0, 8, 14, 21, 29, 38, 55, math.inf]   # = guitar's - needs its own rebin
+"""
+BASS REMAP BINS (diff_bass distribution)
+Tier    Official	remap
+0	    6.7%	    4.9%
+1	    22.8%	    22.7%
+2	    27.6%	    28.9%
+3	    23.9%	    23.9%
+4	    10.9%	    11.8%
+5	    5.8%	    5.3%
+6	    2.4%	    2.5%
+"""
+BASS_REMAP_BINS   = [0, 3, 8, 13, 19, 26, 36, math.inf]    # calibrated vs diff_bass tag distribution
+
+"""
+KEYS REMAP BINS (diff_keys distribution)
+Tier    Official	remap
+0	    8.7%	    6.6%
+1	    19.5%	    22.8%
+2	    18.3%	    18.0%
+3	    22.4%	    20.3%
+4	    14.9%	    15.6%
+5	    8.3%	    8.5%
+6	    7.9%	    8.1%
+"""
+KEYS_REMAP_BINS   = [0, 1, 5, 10, 16, 25, 35, math.inf]    # calibrated vs diff_keys tag distribution
 
 REMAP_BINS = {
     'guitar': GUITAR_REMAP_BINS,
@@ -67,8 +91,8 @@ REMAP_BINS = {
 # --------------------------------------------
 # ~One tier per LN_INC of log(D / BASE_D).
 GUITAR_BASE_D, GUITAR_LN_INC = 7.6, 0.44   # calibrated; also covers coop/rhythm
-BASS_BASE_D,   BASS_LN_INC   = 7.6, 0.44   # = guitar's - needs its own rebin
-KEYS_BASE_D,   KEYS_LN_INC   = 7.6, 0.44   # = guitar's - needs its own rebin
+BASS_BASE_D,   BASS_LN_INC   = 7.6, 0.44   # = not planning to rebin, seems ok
+KEYS_BASE_D,   KEYS_LN_INC   = 7.6, 0.44   # = not planning to rebin, seems ok
 
 CALCTIER_PARAMS = {
     'guitar': (GUITAR_BASE_D, GUITAR_LN_INC),
