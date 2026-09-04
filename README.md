@@ -1,4 +1,4 @@
-# Fretwork v0.7 - Expert 5-Fret Difficulty Analyzer
+# Fretwork - Expert 5-Fret Difficulty Analyzer
 
 This is an analysis tool intended to calculate Expert difficulty for Guitar/Bass/Keys from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
 
