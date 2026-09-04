@@ -17,8 +17,7 @@ N & V balance peak segment impact against average and median
 COV is the interaction that accounts for spikes of difficulty - more variable songs >1, less variable -> 1
 epsilon prevents median values of 0 from collapsing D while still being derived from song data
 
-D/N/V/COV are computed identically regardless of instrument - purely a function of the note
-stream's density/variability shape, nothing instrument-specific in the math itself.
+D/N/V/COV are computed identically regardless of instrument
 
 RemapDiff (0-6 bins) and CalcTier (log-scaled) are instrument-specific
 """
