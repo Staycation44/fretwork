@@ -19,7 +19,6 @@ ini is parsed first on purpose - need to pass down tags for mid sp/solo
 
 import argparse
 import csv
-from email import header
 
 import config
 from functions import instruments, ini_updater, timestamp
