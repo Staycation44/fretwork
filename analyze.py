@@ -1,8 +1,8 @@
 """
 ANALYZE - Loads the cache for config.HEADER & computes density metrics + difficulty values for every instrument present in the cache
-Using Restore skips the calculations/workbook generation and only restores song.inis to backed up values
+Using Restore skips the calculations/spreadsheet generation and only restores song.inis to backed up values
 
-pairs cache and workbook together
+pairs cache and spreadsheet together
     FullTest_cache_08052026-0330.pkl  ->  FullTest_metrics_08052026-0330.xlsx
 
     python analyze.py
@@ -11,7 +11,7 @@ pairs cache and workbook together
     python analyze.py --diff-mode CalcTier
     python analyze.py --diff-mode Restore
 
-Output is a single .xlsx workbook, one tab per instrument group that has data in the cache
+Output is a single .xlsx spreadsheet, one tab per instrument group that has data in the cache
 Formatted via xlsx_format.py
 
 Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
@@ -162,7 +162,7 @@ def main():
     parser.add_argument('--diff-mode', default=None, choices=list(ini_updater.VALID_MODES),
                          help="Write CalcTier/RemapDiff into each instrument's own diff_* tag, or "
                               "Restore every instrument's originals from backup (skips metrics/"
-                              "workbook generation entirely). Default: config.DIFF_WRITE_MODE.")
+                              "spreadsheet generation entirely). Default: config.DIFF_WRITE_MODE.")
     args = parser.parse_args()
 
     analyze(cache_path=args.cache, header=args.header, diff_mode=args.diff_mode)

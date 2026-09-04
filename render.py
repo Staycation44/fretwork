@@ -1,7 +1,7 @@
 """
 RENDER - one PNG per retrieval code based on settings in config + plot
 
-Takes codes from the ANALYZE workbook and writes an individual PNG for each. 
+Takes codes from the ANALYZE spreadsheet and writes an individual PNG for each. 
 Codes are an 8-digit song hash plus a single-letter instrument suffix
 G for guitar, B for bass, K for keys
 
@@ -84,7 +84,7 @@ def _read_codes_file(path):
 
 def main():
     parser = argparse.ArgumentParser(description="Render curve views for one or more songs.")
-    parser.add_argument('codes', nargs='*', help="retrieval code(s) from the metrics workbook, e.g. 04821993B")
+    parser.add_argument('codes', nargs='*', help="retrieval code(s) from the metrics spreadsheet, e.g. 04821993B")
     parser.add_argument('--codes-file', default=None, help="file with one code per line")
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")

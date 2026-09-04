@@ -20,10 +20,9 @@ MID_PARSER - Parses notes.mid files into per-instrument note streams:
         },
     }
 
-Scope is Expert difficulty only, across every recognized 5-fret instrument track found in
-the file (see instruments.py for the full track-name mapping). The file is opened and
-tempo-mapped exactly once regardless of how many instrument tracks it contains - only the
-per-track note/phrase scan repeats, and that scan is cheap relative to the MidiFile load.
+Scope is currently Expert difficulty only
+
+File load is the most expensive part, so midi is still slow, but per instrument scan is pretty fast
 
 NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
 

@@ -9,7 +9,7 @@ INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instr
     OR run restore_from_backup() when mode is "Restore" (restores every instrument at once)
     OR do nothing when mode is None
 
-Restore calls restore_from_backup() directly and skips metrics/workbook generation
+Restore calls restore_from_backup() directly and skips metrics/spreadsheet generation
 
 update_ini_value() patches with a targeted line replacement inside the [song] section,
 preserving everything else in the file and preventing the BOM/encoding from being changed

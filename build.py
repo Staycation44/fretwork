@@ -26,7 +26,7 @@ from functions import instruments, ini_updater, timestamp
 from parsers import chart_parser, ini_parser, mid_parser 
 from functions import cache as cache_mod
 
-# The ini columns that survive to the metrics workbook, aside from per-instrument Difficulty
+# The ini columns that survive to the metrics spreadsheet, aside from per-instrument Difficulty
 META_KEYS = ('Name', 'Artist', 'Charter', 'Release', 'Official')
 
 def _merge_dropped(total, dropped):

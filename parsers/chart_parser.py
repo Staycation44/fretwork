@@ -21,10 +21,9 @@ produced by mid_parser):
         },
     }
 
-Scope is currently Expert difficulty only, across every recognized 5-fret instrument section.
+Scope is currently Expert difficulty only
 
-parse_chart() already read every section in the file (woohoo inefficiency!),
-so extracting several instruments here costs little beyond the extra per-section note scan.
+parse_chart() already read every section in the file (woohoo inefficiency!), so almost no added cost
 
 Fret ENCODING
     One uint8 per tick. Bit N set means fret N is played:
