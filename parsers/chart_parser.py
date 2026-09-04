@@ -1,26 +1,35 @@
 """
-CHART_PARSER - Parses notes.chart files into the same note stream shape produced by mid_parser:
+CHART_PARSER - Parses notes.chart files into per-instrument note streams (same shape
+produced by mid_parser):
     {
         'song_path': str,
         'source_format': 'chart',
         'resolution': int,
-        'notes': {
-            'time_ms': np.ndarray,   # sorted, one entry per tick
-            'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
+        'instruments': {
+            instrument_key: {
+                'notes': {
+                    'time_ms': np.ndarray,   # sorted, one entry per tick
+                    'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
+                },
+                'spans': {
+                    'star_power': [(start_ms, end_ms), ...],
+                    'solo':       [(start_ms, end_ms), ...],
+                },
+                'dropped': {counter_name: int, ...},
+            },
+            ...  # one entry per recognized instrument section actually present in the file
         },
-        'spans': {
-            'star_power': [(start_ms, end_ms), ...],
-            'solo':       [(start_ms, end_ms), ...],
-        },
-        'dropped': {counter_name: int, ...},
     }
 
-Scope is Expert difficulty only, matching mid_parser    
+Scope is currently Expert difficulty only, across every recognized 5-fret instrument section.
+
+parse_chart() already read every section in the file (woohoo inefficiency!),
+so extracting several instruments here costs little beyond the extra per-section note scan.
 
 Fret ENCODING
-    One uint8 per tick. Bit N set means fret N is played: 
+    One uint8 per tick. Bit N set means fret N is played:
     bits 0-4 are GRBYO, bit 7 is open
-    Bits 5-6 are unused - in .chart those are the tap and force-flip modifiers
+    Bits 5-6 are unused (at this time) - in .chart those are the tap and force-flip modifiers
 
     A bitmask rather than a frozenset to support small cache size
 
@@ -32,6 +41,7 @@ import pathlib
 import numpy as np
 import tqdm
 
+from functions import instruments
 from parsers.timing import map_cum, tick_to_ms
 
 # ------------------------
@@ -41,8 +51,6 @@ OPEN_NOTE = 7
 NOTE_FRETS = {0, 1, 2, 3, 4, OPEN_NOTE}
 
 SP_ID = 2 # 'S 2 <length>' in the difficulty section
-
-X_GUITAR = 'ExpertSingle'
 
 SOLO = 'solo'
 SOLO_END = 'soloend'
@@ -109,20 +117,14 @@ def _event_text(event):
     return parts[1].strip().strip('"').strip().lower()
 
 
-def chart_notes(chart_source):
-    c_dict = parse_chart(chart_source)
-    for required in ('Song', 'SyncTrack', X_GUITAR):
-        if required not in c_dict:
-            raise ValueError(f"Missing required section '{required}' in {chart_source}")
+# Extracts one instrument's note stream from its already-parsed difficulty section
+# - a {tick_str: event_or_[events]} dict from parse_chart's c_dict
+# Shared scan logic across every 5-fret instrument
+# Returns None if the section has no usable Expert notes
+def _extract_section(section, instrument_key, to_ms):
+    allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
+    note_frets = NOTE_FRETS if allow_opens else (NOTE_FRETS - {OPEN_NOTE})
 
-    tick_res = int(c_dict['Song']['Resolution'])
-    tempos, sorted_ticks, cum_ms = build_tempo_map(c_dict['SyncTrack'], tick_res)
-
-    def to_ms(tick):
-        return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
-
-    # Bucket lanes by tick. 
-    # parse_chart collapses repeated keys to a chord
     masks_by_tick = {}
     sp = []
     solos = []
@@ -135,8 +137,8 @@ def chart_notes(chart_source):
     solo_open_tick = None
 
     # Tick order matters for solo start/end pairing, so walk sorted.
-    for tick_str in sorted(c_dict[X_GUITAR].keys(), key=int):
-        events = c_dict[X_GUITAR][tick_str]
+    for tick_str in sorted(section.keys(), key=int):
+        events = section[tick_str]
         tick = int(tick_str)
         events = events if isinstance(events, list) else [events]
 
@@ -151,7 +153,7 @@ def chart_notes(chart_source):
 
             if kind == 'N' and len(parts) >= 2:
                 n_val = int(parts[1])
-                if n_val in NOTE_FRETS:
+                if n_val in note_frets:
                     mask |= 1 << n_val
 
             elif kind == 'S' and len(parts) >= 3:
@@ -181,14 +183,11 @@ def chart_notes(chart_source):
         dropped['unclosed_solo'] += 1
 
     if not masks_by_tick:
-        raise ValueError(f"No note events found in {X_GUITAR}")
+        return None
 
     ordered_ticks = sorted(masks_by_tick.keys())
 
     return {
-        'song_path': str(pathlib.Path(chart_source).parent.resolve()),
-        'source_format': 'chart',
-        'resolution': tick_res,
         'notes': {
             'time_ms': np.array([to_ms(t) for t in ordered_ticks]),
             'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
@@ -198,6 +197,44 @@ def chart_notes(chart_source):
             'solo': solos,
         },
         'dropped': dropped,
+    }
+
+
+def chart_notes(chart_source):
+    c_dict = parse_chart(chart_source)
+    for required in ('Song', 'SyncTrack'):
+        if required not in c_dict:
+            raise ValueError(f"Missing required section '{required}' in {chart_source}")
+
+    tick_res = int(c_dict['Song']['Resolution'])
+    tempos, sorted_ticks, cum_ms = build_tempo_map(c_dict['SyncTrack'], tick_res)
+
+    def to_ms(tick):
+        return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
+
+    instruments_out = {}
+    for instrument_key in instruments.INSTRUMENT_KEYS:
+        section = None
+        for section_name in instruments.CHART_SECTIONS[instrument_key]:
+            section = c_dict.get(section_name)
+            if section:
+                break
+
+        if not section:
+            continue  # this instrument just isn't in the file - not an error
+
+        stream = _extract_section(section, instrument_key, to_ms)
+        if stream is not None:
+            instruments_out[instrument_key] = stream
+
+    if not instruments_out:
+        raise ValueError(f"No recognized instrument section with Expert notes found in {chart_source}")
+
+    return {
+        'song_path': str(pathlib.Path(chart_source).parent.resolve()),
+        'source_format': 'chart',
+        'resolution': tick_res,
+        'instruments': instruments_out,
     }
 
 
@@ -218,7 +255,7 @@ def chart_loop(search_path, errors=None):
             chart_out[stream['song_path']] = stream
         except Exception as exc:
             if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc)))
+                errors.append((str(file), type(exc).__name__, str(exc) or repr(exc)))
             continue
 
     return chart_out
