@@ -83,3 +83,66 @@ $$
 $$
 D = N \cdot V \cdot CoV
 $$
+
+
+## Binning Methodology
+
+Reference for the calibration tables behind `functions/formula.py`.
+
+### RemapDiff (0-6) Calibration
+
+`RemapDiff` buckets a song's calculated `D` into a 0-6 label, calibrated per instrument group so that the *distribution* of RemapDiff labels across the reference official library roughly matches the distribution of that group's official `diff_*` tag values. Each row's `D range` is `(lower, upper]` against the **Expert-level D**
+
+#### Guitar (covers Co-op and Rhythm - `GUITAR_REMAP_BINS`)
+
+| Tier | D range        | Official | Remap |
+|------|----------------|---------:|------:|
+| 0    | (0, 8.0]       |    4.3%  |  4.3% |
+| 1    | (8.0, 13.7]    |   10.6%  | 10.5% |
+| 2    | (13.7, 21.2]   |   24.0%  | 24.2% |
+| 3    | (21.2, 29.0]   |   25.1%  | 25.2% |
+| 4    | (29.0, 38.2]   |   17.7%  | 17.6% |
+| 5    | (38.2, 55.2]   |   12.0%  | 12.0% |
+| 6    | (55.2, inf)    |    6.2%  |  6.3% |
+
+#### Bass (`BASS_REMAP_BINS`)
+
+| Tier | D range        | Official | Remap |
+|------|----------------|---------:|------:|
+| 0    | (0, 3.5]       |    6.7%  |  6.9% |
+| 1    | (3.5, 8.3]     |   22.8%  | 22.5% |
+| 2    | (8.3, 13.1]    |   27.6%  | 27.5% |
+| 3    | (13.1, 19.1]   |   23.9%  | 23.9% |
+| 4    | (19.1, 25.6]   |   10.9%  | 11.1% |
+| 5    | (25.6, 36.2]   |    5.8%  |  5.7% |
+| 6    | (36.2, inf)    |    2.4%  |  2.5% |
+
+#### Keys (`KEYS_REMAP_BINS`)
+
+| Tier | D range        | Official | Remap |
+|------|----------------|---------:|------:|
+| 0    | (0, 1.3]       |    8.7%  |  9.3% |
+| 1    | (1.3, 4.8]     |   19.5%  | 19.1% |
+| 2    | (4.8, 9.6]     |   18.3%  | 17.8% |
+| 3    | (9.6, 16.3]    |   22.4%  | 22.6% |
+| 4    | (16.3, 25.2]   |   14.9%  | 14.9% |
+| 5    | (25.2, 35.2]   |    8.3%  |  8.3% |
+| 6    | (35.2, inf)    |    7.9%  |  7.9% |
+
+
+
+### CalcTier Calibration
+
+`CalcTier` is a continuous log-scaled tier (`floor(log(D / BASE_D) / LN_INC) + 1`, 0 below `BASE_D`), uncapped, so very hard officials and many customs land at 7+. All three groups currently share the same constants:
+
+| Group  | BASE_D | LN_INC |
+|--------|-------:|-------:|
+| Guitar |    7.6 |   0.44 |
+| Bass   |    7.6 |   0.44 |
+| Keys   |    7.6 |   0.44 |
+
+These aren't separately fit per group yet, and aren't planned - these are all mechanically similar at this point and do a decent job of representing the actual difficulty.
+
+### EMHX note
+
+Both calibrations above were fit against each group's `diff_*` song.ini tag, assuming expert as the basis. So both `RemapDiff` and `CalcTier` are computed once per (song,instrument) from the **Expert** level's `D` only, and that single pair of values is shown on every EMHX row for that instrument in the metrics spreadsheet.

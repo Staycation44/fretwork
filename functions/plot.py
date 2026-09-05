@@ -37,12 +37,18 @@ def _safe(text, limit=60):
     cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned[:limit] or 'unknown'
 
-# code + instrument + artist + song title
+# code + artist + song title - instrument/level in code
 def output_filename(entry):
     meta = entry.get('meta', {})
-    instrument_label = instruments.DISPLAY_NAMES.get(entry.get('instrument'), '')
-    return (f"{entry['code']}_{_safe(instrument_label)}_"
-            f"{_safe(meta.get('Artist'))} - {_safe(meta.get('Name'))}.png")
+    return f"{entry['code']}_{_safe(meta.get('Artist'))} - {_safe(meta.get('Name'))}.png"
+
+# "Expert Guitar", "Medium Bass", etc - combined EMHX level + instrument label
+def level_instrument_label(entry):
+    level_key = entry.get('level')
+    instrument_key = entry.get('instrument')
+    level_label = instruments.LEVEL_DISPLAY_NAMES.get(level_key, '')
+    instrument_label = instruments.DISPLAY_NAMES.get(instrument_key, '')
+    return f"{level_label} {instrument_label}".strip()
 
 # Theme resolution
 def resolve_theme(profile):
@@ -58,7 +64,7 @@ def _ellipsize(text, limit):
         return text[:max(limit, 0)]
     return text[:limit - 3].rstrip() + '...'
 
-# sets Release (Official tag) - 'Rock Band 3 (official)' or 'Carpal Tunnerl Hero (Custom)'
+# sets Release (Official tag) - 'Rock Band 3 (official)' or 'Carpal Tunnel Hero (Custom)'
 def release_label(meta, limit=None):
     release = str(meta.get('Release') or '').strip() or 'Custom'
     if release.lower() == 'custom':
@@ -66,28 +72,28 @@ def release_label(meta, limit=None):
     tag = 'official' if meta.get('Official') else 'custom'
     return f"{_ellipsize(release, limit)} ({tag})"
 
-# right side metatdata header - instrument / charter / release (tag) / file type / D / calc tier / remap bin
+# right side metatdata header - level+instrument / charter / release (tag) / file type / D / calc tier / remap bin
 def meta_header(entry, difficulty, profile, original_diff=None):
     meta = entry.get('meta', {})
     instrument_key = entry.get('instrument')
-    instrument_label = instruments.DISPLAY_NAMES.get(instrument_key, '')
 
     bits = [
-        instrument_label,
+        level_instrument_label(entry),
         f"charter {_ellipsize(meta.get('Charter', 'unk'), profile.get('charter_limit'))}",
         release_label(meta, profile.get('release_limit')),
         str(entry.get('source_format', '?')),
     ]
 
-# meta.Difficulty is a per-instrument dict set from song.ini at last Build (usually official)
+# meta.Difficulty is a per-instrument dict set from song.ini at last Build (Expert-referenced)
     if difficulty is not None:
         remap = difficulty.get('RemapDiff')
+        calc_tier = difficulty.get('CalcTier')
         ini_diff = (meta.get('Difficulty') or {}).get(instrument_key, '-')
         diff_value = original_diff if original_diff is not None else ini_diff
         bits.append(f"D {difficulty['D']:.2f}")
         bits.append(f"diff {diff_value}")
         bits.append(f"remap bin {remap if remap is not None else '-'}")
-        bits.append(f"calc tier {difficulty['CalcTier']}")
+        bits.append(f"calc tier {calc_tier if calc_tier is not None else '-'}")
     return '  |  '.join(bits)
 
 # flat average distance for header fitting
@@ -159,9 +165,9 @@ def _draw_spans(ax, spans, profile, solo_color):
 
 
 # render each song
-#    entry: cache_mod.entries_by_code() result - a flattened song+instrument entry
+#    entry: cache_mod.entries_by_code() result - a flattened song+instrument+level entry
 #    curves: output of functions.curves.compute_curves
-#    difficulty: optional dict from formula.compute_difficulty, for header
+#    difficulty: optional dict (D/N/V/COV + Expert-anchored RemapDiff/CalcTier), for header
 #    original_diff: optional backed-up original diff_* value for this instrument, for header
 #    profile: style dict + theme
 #    Returns the written path.

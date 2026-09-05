@@ -3,9 +3,9 @@ BUILD - longest part of the process - builds a library cache for analysis/visual
 
 Parses every song.ini, notes.chart and/or notes.mid under config's search_path,
 joins them by file path, and writes one consolidated timestamped cache
-Every recognized instrument (see instruments.py) is extracted from each song's chart/mid file
+Every recognized instrument is extracted from each song's chart/mid file at every level (EMHX)
 
-Additionally backs up every song's original diff_* values (one column per instrument) to {header}_BackupData.csv.
+Additionally backs up every song's original diff_* values w/ instrument columns to {header}_BackupData.csv.
 
 Run this once or whenever your song library changes significantly
 
@@ -34,6 +34,7 @@ def _merge_dropped(total, dropped):
 
 # parse mid & chart files into per-instrument note streams keyed to song folder path
 # each stream contains every recognized instrument (at least 1 must be present)
+# each split into whichever EMHX levels that instrument has charted
 # chart wins on overlap at the whole-song level (a song is assumed to be authored in one format)
 def build_note_index(search_path, mult_notes, errors):
     mid_streams = mid_parser.mid_loop(search_path, mult_notes, errors)
@@ -43,6 +44,23 @@ def build_note_index(search_path, mult_notes, errors):
     note_index.update(mid_streams)
     note_index.update(chart_streams)  # chart wins on overlap
     return note_index
+
+
+# compact instrument x EMHX-level table for the terminal summary
+def _print_instrument_level_matrix(instrument_counts):
+    name_width = max(len(instruments.DISPLAY_NAMES[key]) for key in instruments.INSTRUMENT_KEYS)
+    level_labels = [instruments.LEVEL_DISPLAY_NAMES[level] for level in instruments.LEVEL_KEYS]
+    col_width = max(max(len(label) for label in level_labels), 5) + 2
+
+    header = " " * (name_width + 4) + "".join(label.rjust(col_width) for label in level_labels)
+    print(header)
+    for instrument_key in instruments.INSTRUMENT_KEYS:
+        name = instruments.DISPLAY_NAMES[instrument_key]
+        counts = instrument_counts[instrument_key]
+        row = f"    {name:<{name_width}}" + "".join(
+            str(counts[level]).rjust(col_width) for level in instruments.LEVEL_KEYS
+        )
+        print(row)
 
 
 def build_cache(search_path=None, header=None, out_dir=None):
@@ -70,26 +88,39 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     songs = {}
     no_instruments = 0
-    instrument_counts = {key: 0 for key in instruments.INSTRUMENT_KEYS}
+    instrument_counts = {
+        key: {level: 0 for level in instruments.LEVEL_KEYS}
+        for key in instruments.INSTRUMENT_KEYS
+    }
 
     for song_path, ini_row in ini_rows.items():
         stream = note_index.get(song_path)
         if stream is None:
-            no_instruments += 1  # ini exists but no parseable guitar/bass/etc chart or mid
+            no_instruments += 1  # ini exists but no parseable chart or mid
             continue
 
         song_instruments = {}
-        for instrument_key, inst_stream in stream['instruments'].items():
-            if len(inst_stream['notes']['time_ms']) == 0:
-                errors.append((song_path, 'EmptyStream', f'{instrument_key}: parsed to zero notes'))
-                continue
+        for instrument_key, inst_data in stream['instruments'].items():
+            # dropped counters for this song's instrument, merged into the total for the run
+            _merge_dropped(dropped_total, inst_data.get('dropped'))
 
-            _merge_dropped(dropped_total, inst_stream.get('dropped'))
-            song_instruments[instrument_key] = {
-                'notes': inst_stream['notes'],
-                'spans': inst_stream['spans'],
-            }
-            instrument_counts[instrument_key] += 1
+            song_levels = {}
+            for level_key, level_stream in inst_data['levels'].items():
+                if len(level_stream['notes']['time_ms']) == 0:
+                    errors.append((
+                        song_path, 'EmptyStream',
+                        f'{instrument_key} ({level_key}): parsed to zero notes',
+                    ))
+                    continue
+
+                song_levels[level_key] = {
+                    'notes': level_stream['notes'],
+                    'spans': level_stream['spans'],
+                }
+                instrument_counts[instrument_key][level_key] += 1
+
+            if song_levels:
+                song_instruments[instrument_key] = song_levels
 
         if not song_instruments:
             no_instruments += 1
@@ -117,22 +148,24 @@ def build_cache(search_path=None, header=None, out_dir=None):
         header, config.CACHE_DIR,
     )
 
-    # codes assigned per (song, instrument) present - see cache.assign_codes
-    pairs = [
-        (song_path, instrument_key)
+    # codes assigned per (song, instrument, level) present
+    triples = [
+        (song_path, instrument_key, level_key)
         for song_path, song in songs.items()
-        for instrument_key in song['instruments']
+        for instrument_key, levels in song['instruments'].items()
+        for level_key in levels
     ]
-    pair_codes = cache_mod.assign_codes(pairs)
-    for (song_path, instrument_key), code in pair_codes.items():
-        songs[song_path].setdefault('codes', {})[instrument_key] = code
+    triple_codes = cache_mod.assign_codes(triples)
+    for (song_path, instrument_key, level_key), code in triple_codes.items():
+        codes_for_song = songs[song_path].setdefault('codes', {})
+        codes_for_song.setdefault(instrument_key, {})[level_key] = code
 
     gen_on = cache_mod.gen_ts()
 
     built = {
         'generated_at': gen_on,
         'search_path': str(search_path),
-        'codes': {code: song_path for (song_path, _instrument_key), code in pair_codes.items()},
+        'codes': {code: song_path for (song_path, _instrument_key, _level_key), code in triple_codes.items()},
         'songs': songs,
         'dropped': dropped_total,
     }
@@ -147,10 +180,9 @@ def build_cache(search_path=None, header=None, out_dir=None):
     print(f"    Errors                {len(errors)}")
     print(f"    Diffs backed up       {backed_up}")
     print(f"    Cached songs          {len(songs)}")
-    
-    print(f"\nSongs per instrument:")
-    for instrument_key in instruments.INSTRUMENT_KEYS:
-        print(f"    {instruments.DISPLAY_NAMES[instrument_key]:<14} {instrument_counts[instrument_key]}")
+
+    print(f"\nSongs per instrument/level:")
+    _print_instrument_level_matrix(instrument_counts)
 
     if dropped_total:
         print(f"\nDropped during parsing:")

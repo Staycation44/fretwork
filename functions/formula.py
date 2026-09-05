@@ -1,5 +1,5 @@
 """
-FORMULA - Per-song difficulty scalar, computed by functions.density.compute_density_metrics
+FORMULA - Per-song difficulty scalar, computed from outputs of functions.density.compute_density_metrics
 
 D = N * V * COV
 
@@ -14,12 +14,14 @@ D = N * V * COV
     COV = 1 + (cvN * cvV) ** 0.5
 
 N & V balance peak segment impact against average and median
-COV is the interaction that accounts for spikes of difficulty - more variable songs >1, less variable -> 1
+COV is the interaction that accounts for uneven difficulty - more variable songs >1, less variable -> 1
 epsilon prevents median values of 0 from collapsing D while still being derived from song data
 
 D/N/V/COV are computed identically regardless of instrument
 
-RemapDiff (0-6 bins) and CalcTier (log-scaled) are instrument-specific
+RemapDiff (0-6 bins) and CalcTier (log-scaled) are instrument-specific - see Methodology.md for calibration data
+
+EMHX / RemapDiff & CalcTier anchor to expert, since only 1 diff value per instrument in song.ini
 """
 
 import math
@@ -40,44 +42,11 @@ CALIBRATION_GROUP = {
 # ---------------------------------
 DIFF_LABELS = [0, 1, 2, 3, 4, 5, 6]   # shared label set
 
-"""
-GUITAR REMAP BINS (diff_guitar distribution)
-Tier    Official	remap
-0	    4.3%	    4.3%
-1	    10.6%	    11.2%
-2	    24.0%	    22.8%
-3	    25.1%	    25.9%
-4	    17.7%	    17.2%
-5	    12.0%	    12.3%
-6	    6.2%	    6.4%
-"""
-GUITAR_REMAP_BINS = [0, 8, 14, 21, 29, 38, 55, math.inf]   # calibrated vs diff_guitar tag distribution (incl coop/rhythm)
-
-"""
-BASS REMAP BINS (diff_bass distribution)
-Tier    Official	remap
-0	    6.7%	    4.9%
-1	    22.8%	    22.7%
-2	    27.6%	    28.9%
-3	    23.9%	    23.9%
-4	    10.9%	    11.8%
-5	    5.8%	    5.3%
-6	    2.4%	    2.5%
-"""
-BASS_REMAP_BINS   = [0, 3, 8, 13, 19, 26, 36, math.inf]    # calibrated vs diff_bass tag distribution
-
-"""
-KEYS REMAP BINS (diff_keys distribution)
-Tier    Official	remap
-0	    8.7%	    6.6%
-1	    19.5%	    22.8%
-2	    18.3%	    18.0%
-3	    22.4%	    20.3%
-4	    14.9%	    15.6%
-5	    8.3%	    8.5%
-6	    7.9%	    8.1%
-"""
-KEYS_REMAP_BINS   = [0, 1, 5, 10, 16, 25, 35, math.inf]    # calibrated vs diff_keys tag distribution
+# Bin edges calibrated so RemapDiff distribution roughly matches diff_* tag's official distribution in the reference library - see Methodology.md
+# Methodology.md has table data for these bins
+GUITAR_REMAP_BINS = [0, 8.0, 13.7, 21.2, 29.0, 38.2, 55.2, math.inf]
+BASS_REMAP_BINS   = [0, 3.5, 8.3, 13.1, 19.1, 25.6, 36.2, math.inf]
+KEYS_REMAP_BINS   = [0, 1.3, 4.8, 9.6, 16.3, 25.2, 35.2, math.inf]
 
 REMAP_BINS = {
     'guitar': GUITAR_REMAP_BINS,
@@ -88,10 +57,10 @@ REMAP_BINS = {
 # --------------------------------------------
 # CalcTier (log-scaled) params, per group
 # --------------------------------------------
-# ~One tier per LN_INC of log(D / BASE_D).
-GUITAR_BASE_D, GUITAR_LN_INC = 7.6, 0.44   # calibrated; also covers coop/rhythm
-BASS_BASE_D,   BASS_LN_INC   = 7.6, 0.44   # = not planning to rebin, seems ok
-KEYS_BASE_D,   KEYS_LN_INC   = 7.6, 0.44   # = not planning to rebin, seems ok
+# ~One tier per LN_INC of log(D / BASE_D). Shared across all three groups for now
+GUITAR_BASE_D, GUITAR_LN_INC = 7.6, 0.44
+BASS_BASE_D,   BASS_LN_INC   = 7.6, 0.44
+KEYS_BASE_D,   KEYS_LN_INC   = 7.6, 0.44
 
 CALCTIER_PARAMS = {
     'guitar': (GUITAR_BASE_D, GUITAR_LN_INC),
@@ -119,8 +88,9 @@ def calc_tier(D, instrument='guitar'):
         return 0
     return int(math.floor(math.log(D / base_d) / ln_inc) + 1)
 
-# D Formula
-def calc_diff(metrics, instrument='guitar'):
+# D Formula - N/V/COV/D only, instrument-agnostic 
+# Split out from calc_diff so RemapDiff/CalcTier calc can be anchored to Expert level's D
+def calc_nvcov(metrics):
     pNPS, medNPS, aNPS, stdNPS = metrics['pNPS'], metrics['medNPS'], metrics['aNPS'], metrics['stdNPS']
     pVPS, medVPS, aVPS, stdVPS = metrics['pVPS'], metrics['medVPS'], metrics['aVPS'], metrics['stdVPS']
 
@@ -137,7 +107,7 @@ def calc_diff(metrics, instrument='guitar'):
     # CoV interaction across NPS & VPS
     COV = 1 + (cvN * cvV) ** 0.5
 
-    # base scalar difficulty - instrument-agnostic
+    # base scalar difficulty
     D = N * V * COV
 
     return {
@@ -145,6 +115,22 @@ def calc_diff(metrics, instrument='guitar'):
         'V': V,
         'COV': COV,
         'D': D,
+    }
+
+# D Formula - self-anchored
+def calc_diff(metrics, instrument='guitar'):
+    nvcov = calc_nvcov(metrics)
+    D = nvcov['D']
+
+    return {
+        **nvcov,
         'RemapDiff': remap_diff(D, instrument),
         'CalcTier': calc_tier(D, instrument),
     }
+
+# RemapDiff/CalcTier anchored to the Expert level's D
+def anchor_remap_tier(expert_metrics, instrument='guitar'):
+    if expert_metrics is None:
+        return None, None
+    expert_D = calc_nvcov(expert_metrics)['D']
+    return remap_diff(expert_D, instrument), calc_tier(expert_D, instrument)

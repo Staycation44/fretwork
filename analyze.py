@@ -1,5 +1,6 @@
 """
-ANALYZE - Loads the cache for config.HEADER & computes density metrics + difficulty values for every instrument present in the cache
+ANALYZE - Loads the cache for config.HEADER & computes density metrics + difficulty values
+for every instrument/EMHX-level present in the cache
 Using Restore skips the calculations/spreadsheet generation and only restores song.inis to backed up values
 
 pairs cache and spreadsheet together
@@ -12,9 +13,14 @@ pairs cache and spreadsheet together
     python analyze.py --diff-mode Restore
 
 Output is a single .xlsx spreadsheet, one tab per instrument group that has data in the cache
+(EMHX levels share the same tab as a filterable 'Level' column - see xlsx_format.py - not
+separate tabs per level)
 Formatted via xlsx_format.py
 
 Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
+
+EMHX / RemapDiff & CalcTier anchor to expert, since only 1 diff value per instrument in song.ini
+D remains calculated per level
 """
 import argparse
 import pathlib
@@ -28,24 +34,39 @@ from functions import cache as cache_mod
 from functions import density, formula, ini_updater, xlsx_format, timestamp
 
 COLUMN_ORDER = [
-    'Code', 'Song Title', 'Artist', 'Type', 'Charter', 'Release', 'Official',
+    'Code', 'Song Title', 'Artist', 'Level', 'Type', 'Charter', 'Release', 'Official',
     'NoteCount', 'DurationS', 'Difficulty', 'D', 'RemapDiff', 'CalcTier',
     'pNPS', 'aNPS', 'medNPS', 'stdNPS', 'pVPS', 'aVPS', 'medVPS', 'stdVPS',
     'N', 'V', 'COV',
 ]
 
 
-def song_row(code, meta, inst_entry, instrument_key):
-    metrics = density.calc_metrics(inst_entry['notes'])
+# Computes the one RemapDiff/CalcTier pair for a (song, instrument), anchored to the Expert level's D.
+def _anchor_remap_tier(levels, instrument_key):
+    expert_entry = levels.get('expert')
+    if expert_entry is None:
+        return None, None
+
+    expert_metrics = density.calc_metrics(expert_entry['notes'])
+    if expert_metrics is None:
+        return None, None
+
+    expert_D = formula.calc_nvcov(expert_metrics)['D']
+    return formula.remap_diff(expert_D, instrument_key), formula.calc_tier(expert_D, instrument_key)
+
+
+def song_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor_tier):
+    metrics = density.calc_metrics(notes)
     if metrics is None:
         return None
-    difficulty = formula.calc_diff(metrics, instrument_key)
+    nvcov = formula.calc_nvcov(metrics)
 
     row_meta = {
         'Name': meta.get('Name'),
         'Artist': meta.get('Artist'),
         'Charter': meta.get('Charter'),
         'Type': instruments.TYPE_LABELS[instrument_key],
+        'Level': instruments.LEVEL_DISPLAY_NAMES[level_key],
         'Difficulty': (meta.get('Difficulty') or {}).get(instrument_key, '-1'),
         'Release': meta.get('Release'),
         'Official': meta.get('Official'),
@@ -55,7 +76,9 @@ def song_row(code, meta, inst_entry, instrument_key):
         'Code': code,
         **row_meta,
         **metrics,
-        **difficulty,
+        **nvcov,
+        'RemapDiff': anchor_remap,
+        'CalcTier': anchor_tier,
     }
 
 # run the analysis - loading from selected/default cache
@@ -75,34 +98,48 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     gen_on = cache.get('generated_at', 'unknown')
 
     rows_by_instrument = {key: [] for key in instruments.INSTRUMENT_KEYS}
+    row_counts = {
+        key: {level: 0 for level in instruments.LEVEL_KEYS}
+        for key in instruments.INSTRUMENT_KEYS
+    }
     difficulties_by_instrument = {key: {} for key in instruments.INSTRUMENT_KEYS}
     total = 0
     skipped = 0
 
-    all_inst_entries = [
-        (song_path, instrument_key, inst_entry)
+    # one item per (song, instrument) - EMHX levels are handled inside the loop
+    all_song_instruments = [
+        (song_path, instrument_key, levels)
         for song_path, song in cache['songs'].items()
-        for instrument_key, inst_entry in song.get('instruments', {}).items()
+        for instrument_key, levels in song.get('instruments', {}).items()
     ]
 
     print(f"\nAnalyzing {header} cache")
-    for song_path, instrument_key, inst_entry in tqdm.tqdm(
-        all_inst_entries, desc="Computing metrics", unit="song"
+    for song_path, instrument_key, levels in tqdm.tqdm(
+        all_song_instruments, desc="Computing metrics", unit="song/instrument"
     ):
-        total += 1
         song = cache['songs'][song_path]
-        code = song.get('codes', {}).get(instrument_key)
+        codes_for_instrument = song.get('codes', {}).get(instrument_key, {})
 
-        row = song_row(code, song['meta'], inst_entry, instrument_key)
-        if row is None:
-            skipped += 1
-            continue
+        anchor_remap, anchor_tier = _anchor_remap_tier(levels, instrument_key)
 
-        rows_by_instrument[instrument_key].append(row)
-        if diff_mode in ("CalcTier", "RemapDiff"):
+        if diff_mode in ("CalcTier", "RemapDiff") and anchor_remap is not None:
             difficulties_by_instrument[instrument_key][song_path] = {
-                k: row[k] for k in ('CalcTier', 'RemapDiff')
+                'RemapDiff': anchor_remap,
+                'CalcTier': anchor_tier,
             }
+
+        for level_key, inst_entry in levels.items():
+            total += 1
+            code = codes_for_instrument.get(level_key)
+
+            row = song_row(code, song['meta'], inst_entry['notes'], instrument_key,
+                            level_key, anchor_remap, anchor_tier)
+            if row is None:
+                skipped += 1
+                continue
+
+            rows_by_instrument[instrument_key].append(row)
+            row_counts[instrument_key][level_key] += 1
 
     # song.ini write-back happens after metrics are computed for every song
     if diff_mode in ("CalcTier", "RemapDiff"):
@@ -130,7 +167,9 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             # Difficulty comes from song.ini as a string, convert to numeric and fill missing with -1
             df['Difficulty'] = pd.to_numeric(df['Difficulty'], errors='coerce').fillna(-1).astype(int)
 
-            df = df[COLUMN_ORDER].round(2)
+            df = df[COLUMN_ORDER]
+            float_cols = [c for c in df.columns if c in xlsx_format.FLOAT_COLS or c == 'D']
+            df[float_cols] = df[float_cols].round(2)
             df = df.sort_values('D', ascending=False)
 
             sheet = sheet_name[:31]  # Excel sheet-name limit
@@ -143,11 +182,19 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     print(  f"Cache version:  {gen_on}")
     print(  f"Rows written:   {total}")
 
-    print(f"\nRows per instrument:")
+    print(f"\nRows per instrument/level:")
+    name_width = max(len(instruments.DISPLAY_NAMES[key]) for key in instruments.INSTRUMENT_KEYS)
+    level_labels = [instruments.LEVEL_DISPLAY_NAMES[level] for level in instruments.LEVEL_KEYS]
+    col_width = max(max(len(label) for label in level_labels), 5) + 2
+    print(" " * (name_width + 4) + "".join(label.rjust(col_width) for label in level_labels))
     for instrument_key in instruments.INSTRUMENT_KEYS:
-        n = len(rows_by_instrument[instrument_key])
-        if n:
-            print(f"    {instruments.DISPLAY_NAMES[instrument_key]:<14} {n}")
+        counts = row_counts[instrument_key]
+        if not any(counts.values()):
+            continue
+        name = instruments.DISPLAY_NAMES[instrument_key]
+        print(f"    {name:<{name_width}}" + "".join(
+            str(counts[level]).rjust(col_width) for level in instruments.LEVEL_KEYS
+        ))
 
     print(f"\nSpreadsheet written: {pathlib.Path(xlsx_out).resolve()}")
     print()
@@ -160,7 +207,8 @@ def main():
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")
     parser.add_argument('--diff-mode', default=None, choices=list(ini_updater.VALID_MODES),
-                         help="Write CalcTier/RemapDiff into each instrument's own diff_* tag, or "
+                         help="Write CalcTier/RemapDiff into each instrument's own diff_* tag "
+                              "(anchored to the Expert-level D - see module docstring), or "
                               "Restore every instrument's originals from backup (skips metrics/"
                               "spreadsheet generation entirely). Default: config.DIFF_WRITE_MODE.")
     args = parser.parse_args()
