@@ -100,6 +100,7 @@ Each tab is formatted for browsing. The raw NPS/VPS details and N/V/COV formula 
 #### 5-Fret D Formula
 
 **Full formula details in `Methodology.md`**
+
 $$
 D = N \cdot V \cdot CoV
 $$
