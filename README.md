@@ -1,4 +1,4 @@
-# Fretwork - Expert 5-Fret Difficulty Analyzer
+# Fretwork - Expert 5-Fret Difficulty Analyzer <!-- omit in toc -->
 
 This is an analysis tool intended to calculate Expert difficulty for Guitar/Bass/Keys from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
 
@@ -10,7 +10,7 @@ Libraries required: **pandas, numpy, tqdm, mido, matplotlib, and openpyxl**
 
 ![Render Example](https://github.com/Staycation44/fretwork/blob/main/renders/02139802G_Guitar_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
 
-## Using Fretwork
+## Using Fretwork <!-- omit in toc -->
 To use the tool setup **config** and run these in order:
 
 1. **Build** - Scan a library, save everything into a cache file, & creates a backup of original difficulties
@@ -47,7 +47,7 @@ ex. `Library_cache_08052026-0330.pkl`, `Library_metrics_08052026-0330.xlsx`.
 
 You can also override `SEARCH_PATH` and `HEADER` on the command line (via `--search-path` / `--header`) instead of editing the file, if preferred.
 
-### Render appearance settings
+### Render appearance settings <!-- omit in toc -->
 
 Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs look:
 
@@ -97,7 +97,7 @@ An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx`, with one tab per
 
 Each tab is formatted for browsing. The raw NPS/VPS details and N/V/COV formula columns are included but hidden by default - unhide them if you want to see the components behind D.
 
-#### 5-Fret D Formula
+#### 5-Fret D Formula <!-- omit in toc -->
 
 **Full formula details in `Methodology.md`**
 
@@ -160,7 +160,7 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - Midi files misbehaving - *possibly parser drift / file corrruption/truncation?*
 
 **Extension Ideas:**
-- Adding Easy/Med/Hard
+- Adding Easy/Med/Hard - *Testing, poor performance on Analyze*
 - Vocals (Unique data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - Drums (similar data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - RB style band diff once all instruments are in
