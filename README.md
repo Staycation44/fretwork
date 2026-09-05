@@ -1,4 +1,4 @@
-# Fretwork - 5-Fret Difficulty Analyzer
+# Fretwork - 5-Fret Difficulty Analyzer <!-- omit in toc -->
 
 This is an analysis tool intended to calculate Difficulty across Easy/Medium/Hard/Expert for Guitar/Bass/Keys from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
 
@@ -10,25 +10,20 @@ Libraries required: **pandas, numpy, tqdm, mido, matplotlib, and openpyxl**
 
 ![Render Example](https://github.com/Staycation44/fretwork/blob/main/renders/02139802G_Guitar_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
 
-## Using Fretwork
+## Using Fretwork <!-- omit in toc -->
 To use the tool setup **config** and run these in order:
 
 1. **Build** - Scan a library, save everything into a cache file, & creates a backup of original difficulties
 2. **Analyze** - Turn Build's cache into an .xlsx spreadsheet including song metadata and calculated metrics for every song/instrument combo. Optionally, applies calculated difficulty to `song.ini` files for use in game, or restores them back to their originals from the backup
 3. **Render** - Output a PNG graph of metrics over time for one or more song/instrument combos based on a retrieval code from the spreadsheet
 
-## Index
-- [Fretwork - 5-Fret Difficulty Analyzer](#fretwork---5-fret-difficulty-analyzer)
-  - [Using Fretwork](#using-fretwork)
-  - [Index](#index)
-  - [1. Setup: `config.py`](#1-setup-configpy)
-    - [Render appearance settings](#render-appearance-settings)
-  - [2. Building a cache](#2-building-a-cache)
-  - [3. Analyzing a cache](#3-analyzing-a-cache)
-      - [5-Fret D Formula](#5-fret-d-formula)
-  - [4. Rendering song graphs](#4-rendering-song-graphs)
-  - [5. Fixes/Extension Ideas](#5-fixesextension-ideas)
-  - [License](#license)
+## Index <!-- omit in toc -->
+- [1. Setup: `config.py`](#1-setup-configpy)
+- [2. Building a cache](#2-building-a-cache)
+- [3. Analyzing a cache](#3-analyzing-a-cache)
+- [4. Rendering song graphs](#4-rendering-song-graphs)
+- [5. Fixes/Extension Ideas](#5-fixesextension-ideas)
+- [License](#license)
 
 ---
 
@@ -52,7 +47,7 @@ ex. `Library_cache_08052026-0330.pkl`, `Library_metrics_08052026-0330.xlsx`.
 
 You can also override `SEARCH_PATH` and `HEADER` on the command line (via `--search-path` / `--header`) instead of editing the file, if preferred.
 
-### Render appearance settings
+### Render appearance settings <!-- omit in toc -->
 
 Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs look:
 
@@ -101,7 +96,7 @@ An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx`, with one tab per
 
 Each tab is formatted for browsing. The raw NPS/VPS details and N/V/COV formula components are included but hidden by default - unhide them if you want to see the components behind D.
 
-#### 5-Fret D Formula
+#### 5-Fret D Formula <!-- omit in toc -->
 
 **Full formula details in `Methodology.md`**
 $$

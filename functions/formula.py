@@ -5,11 +5,11 @@ D = N * V * COV
 
     epsN = pNPS * 0.05
     N = ((medNPS + epsN) * aNPS * pNPS) ** (1 / 3)
-    cvN = (stdNPS / aNPS + medNPS)
+    cvN = stdNPS / (aNPS + medNPS)
 
     epsV = pVPS * 0.05
     V = ((medVPS + epsV) * aVPS * pVPS) ** (1 / 3)
-    cvV = (stdVPS / aVPS + medVPS)
+    cvV = stdVPS / (aVPS + medVPS)
 
     COV = 1 + (cvN * cvV) ** 0.5
 

@@ -1,9 +1,11 @@
 """
 INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instrument:
 
-- update_ini_value() / get_ini_value(): read or patch one key in [song]
+- update_ini_values() / update_ini_value() / get_ini_value(): patch several keys or one key
+  in [song], or read one back
 - backup_data(): backs up each song's original diff_* values the first time it's seen (BUILD)
-- restore_from_backup(): restores every diff_* tag present in the backup back to its original (every instrument)
+- restore_from_backup(): restores every diff_* tag present in the backup back to its original
+  (every instrument, in a single read/write pass per song.ini)
 - sync_difficulty(): ANALYZE decision, driven by config.DIFF_WRITE_MODE (or --diff-mode) to:
     write CalcTier/RemapDiff into song.ini's diff_<instrument> tag for one instrument's mode
     OR run restore_from_backup() when mode is "Restore" (restores every instrument at once)
@@ -11,9 +13,9 @@ INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instr
 
 Restore calls restore_from_backup() directly and skips metrics/spreadsheet generation
 
-update_ini_value() patches with a targeted line replacement inside the [song] section,
+update_ini_values() patches with targeted line replacements inside the [song] section,
 preserving everything else in the file and preventing the BOM/encoding from being changed
-It will also add the key if it doesn't exist
+It will also add any key that doesn't already exist
 """
 
 import csv
@@ -24,6 +26,11 @@ from functions import instruments
 # backup CSV columns: song_path + one column per instrument's actual ini tag name
 BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
 VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
+
+
+# song folder -> its song.ini, joined by pathlib so the separator matches song_path's own
+def song_ini_path(song_path):
+    return pathlib.Path(song_path) / "song.ini"
 
 
 # ---------------------------------------------------------------------
@@ -63,10 +70,12 @@ def _song_section_bounds(lines):
         return start, len(lines)
     return None, None
 
-# Patches a single key = value line inside [song]
-# Leaves everything else alone
-# Adds the key at the end of the section if it isn't already present
-def update_ini_value(ini_path, key, value):
+# Patches any number of key = value lines inside [song], in one read/write pass
+# Leaves everything else alone, new keys at end
+def update_ini_values(ini_path, values):
+    if not values:
+        return
+
     text, encoding = _read_text(ini_path)
     newline = '\r\n' if '\r\n' in text else '\n'
     ends_with_newline = text.endswith(('\n', '\r\n'))
@@ -76,31 +85,41 @@ def update_ini_value(ini_path, key, value):
     if start is None:
         raise KeyError(f"No [song] section found in {ini_path}")
 
-    key_lower = key.strip().lower()
-    target = None
+    # keyed lowercase for matching, carrying the original key spelling for the append case
+    pending = {key.strip().lower(): (key, value) for key, value in values.items()}
+
     for i in range(start, end):
+        if not pending:
+            break
         stripped = lines[i].strip()
         if not stripped or stripped[0] in ';#' or '=' not in stripped:
             continue
         k = stripped.split('=', 1)[0].strip().lower()
-        if k == key_lower:
-            target = i
-            break
+        if k not in pending:
+            continue
 
-    if target is not None:
-        line = lines[target]
+        # first occurrence of a key wins
+        _key, value = pending.pop(k)
+        line = lines[i]
         eq_idx = line.index('=')
         prefix = line[:eq_idx + 1]
         had_space = line[eq_idx + 1:eq_idx + 2] == ' '
-        lines[target] = f"{prefix}{' ' if had_space else ''}{value}"
-    else:
+        lines[i] = f"{prefix}{' ' if had_space else ''}{value}"
+
+    for key, value in pending.values():
         lines.insert(end, f"{key} = {value}")
+        end += 1
 
     new_text = newline.join(lines)
     if ends_with_newline:
         new_text += newline
 
     _write_text(ini_path, new_text, encoding)
+
+
+# single-key convenience wrapper
+def update_ini_value(ini_path, key, value):
+    update_ini_values(ini_path, {key: value})
 
 
 def get_ini_value(ini_path, key):
@@ -183,6 +202,7 @@ def backup_data(songs, header, cache_dir):
 
 # Restores every song.ini for header back to its backed-up diff_* values,
 # a blank column means that instrument wasn't charted for that song at backup time / no tag added
+# Every tag for a song is written in a single pass - one read/write per song.ini
 # Returns (restored_count, failures) if a song folder was moved, deleted, etc
 def restore_from_backup(header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
@@ -194,18 +214,26 @@ def restore_from_backup(header, cache_dir):
     with open(backup_csv, "r", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             song_path = row["song_path"]
-            song_failed = False
-            for instrument_key, diff_tag in instruments.DIFF_TAGS.items():
-                value = row.get(diff_tag)
-                if not value:
-                    continue  # blank column, leave song.ini alone
-                try:
-                    update_ini_value(f"{song_path}/song.ini", diff_tag, value)
-                except Exception as exc:
-                    failed.append((song_path, instrument_key, type(exc).__name__, str(exc)))
-                    song_failed = True
-            if not song_failed:
+
+            values = {
+                diff_tag: row[diff_tag]
+                for diff_tag in instruments.DIFF_TAGS.values()
+                if row.get(diff_tag)
+            }
+            if not values:
+                continue  # every column blank, leave song.ini alone
+
+            ini_path = song_ini_path(song_path)
+            if not ini_path.is_file():
+                # song folder moved or deleted since BUILD
+                failed.append((song_path, None, 'FileNotFoundError', f"no song.ini at {ini_path}"))
+                continue
+
+            try:
+                update_ini_values(ini_path, values)
                 restored += 1
+            except Exception as exc:
+                failed.append((song_path, None, type(exc).__name__, str(exc)))
 
     return restored, failed
 
@@ -239,8 +267,12 @@ def sync_difficulty(mode, header, cache_dir, instrument=None, songs=None, diffic
     applied = 0
     failed = []
     for song_path in songs:
+        ini_path = song_ini_path(song_path)
+        if not ini_path.is_file():
+            failed.append((song_path, 'FileNotFoundError', f"no song.ini at {ini_path}"))
+            continue
         try:
-            update_ini_value(f"{song_path}/song.ini", diff_tag, difficulties[song_path][mode])
+            update_ini_values(ini_path, {diff_tag: difficulties[song_path][mode]})
             applied += 1
         except Exception as exc:
             failed.append((song_path, type(exc).__name__, str(exc)))

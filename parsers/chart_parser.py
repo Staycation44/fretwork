@@ -48,7 +48,7 @@ import numpy as np
 import tqdm
 
 from functions import instruments
-from parsers.timing import map_cum, tick_to_ms
+from parsers.timing import map_cum, tempo_arrays, tick_to_ms, ticks_to_ms
 
 # ------------------------
 # Chart-specific constants
@@ -127,8 +127,9 @@ def _event_text(event):
 # - a {tick_str: event_or_[events]} dict from parse_chart's c_dict
 # Shared scan logic across every 5-fret instrument and every level
 # note numbering (0-4/7) doesn't change per level
+# to_ms converts one span endpoint, to_ms_array converts the whole note-tick array at once
 # Returns None if the section has no usable notes
-def _extract_section(section, instrument_key, to_ms):
+def _extract_section(section, instrument_key, to_ms, to_ms_array):
     allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
     note_frets = NOTE_FRETS if allow_opens else (NOTE_FRETS - {OPEN_NOTE})
 
@@ -196,7 +197,7 @@ def _extract_section(section, instrument_key, to_ms):
 
     return {
         'notes': {
-            'time_ms': np.array([to_ms(t) for t in ordered_ticks]),
+            'time_ms': to_ms_array(ordered_ticks),
             'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
         },
         'spans': {
@@ -216,8 +217,13 @@ def chart_notes(chart_source):
     tick_res = int(c_dict['Song']['Resolution'])
     tempos, sorted_ticks, cum_ms = build_tempo_map(c_dict['SyncTrack'], tick_res)
 
+    tempo_arrs = tempo_arrays(tempos, sorted_ticks, cum_ms)
+
     def to_ms(tick):
         return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
+
+    def to_ms_array(ticks):
+        return ticks_to_ms(ticks, tick_res, *tempo_arrs)
 
     instruments_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
@@ -235,7 +241,7 @@ def chart_notes(chart_source):
             if not section:
                 continue  # this instrument/level combo just isn't in the file - not an error
 
-            stream = _extract_section(section, instrument_key, to_ms)
+            stream = _extract_section(section, instrument_key, to_ms, to_ms_array)
             if stream is None:
                 continue
 

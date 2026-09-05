@@ -40,7 +40,7 @@ HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 # Overridable per-run with --diff-mode on ANALYZE
 # Safest to leave this at None and use --diff-mode when you actually want to override
 
-DIFF_WRITE_MODE = "None" # None | "CalcTier" | "RemapDiff" | "Restore"
+DIFF_WRITE_MODE = None # None | "CalcTier" | "RemapDiff" | "Restore"
 
 
 

@@ -50,7 +50,7 @@ import numpy as np
 import tqdm
 
 from functions import instruments
-from parsers.timing import map_cum, tick_to_ms
+from parsers.timing import map_cum, tempo_arrays, tick_to_ms, ticks_to_ms
 
 # ---------------------------------------------------------------------
 # Mid-specific constants
@@ -128,13 +128,9 @@ def _is_note_off(msg):
 
 # Extracts one instrument's note stream from its located track, split into per-EMHX-level lane masks from one scan
 # Returns None if the track has no usable notes at any level
-def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
+def _extract_track(track, instrument_key, to_ms, to_ms_array, multiplier_note=None):
     allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
-
-    enhanced_opens = allow_opens and any(
-        msg.type == 'text' and ENH_OPEN in msg.text.upper()
-        for msg in track
-    )
+    enhanced_opens = False
 
     # star power / solo pitch assignment - track-wide, shared across every EMHX level
     legacy_sp = (multiplier_note == LEGACY_SP)
@@ -156,6 +152,7 @@ def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
     solos = []
 
     open_starts = {}
+    pending_opens = []   # (abs_tick, level_key) - applied only if ENHANCED_OPENS turns up
     abs_tick = 0
 
     for msg in track:
@@ -170,10 +167,9 @@ def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
                 level_key, lane = LANE_PITCH_TO_INFO[pitch]
 
             elif allow_opens and pitch in OPEN_PITCH_TO_LEVEL:
-                if enhanced_opens:
-                    level_key = OPEN_PITCH_TO_LEVEL[pitch]
-                    lane = OPEN_MID
-                # else: note-based open marker without ENHANCED_OPENS
+                # held until the track has been scanned for ENHANCED_OPENS
+                # dropped if the marker is missing
+                pending_opens.append((abs_tick, OPEN_PITCH_TO_LEVEL[pitch]))
 
             elif allow_opens and pitch == M_OPEN_PIT:
                 if msg.channel == M_OPEN_CNL:
@@ -199,7 +195,16 @@ def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
                     elif pitch == solo_pitch:
                         solos.append((to_ms(start_tick), to_ms(abs_tick)))
 
-    # Anything still open at end of track never closes. Dropped, but counted for errors
+        elif msg.type == 'text' and ENH_OPEN in msg.text.upper():
+            enhanced_opens = True
+
+    # Note-based only if the track has ENHANCED_OPENS
+    if allow_opens and enhanced_opens:
+        for open_tick, level_key in pending_opens:
+            level_masks = masks_by_tick[level_key]
+            level_masks[open_tick] = level_masks.get(open_tick, 0) | (1 << OPEN_MID)
+
+    # Anything still open at end - Dropped, but counted for errors
     for pitch, starts in open_starts.items():
         if not starts:
             continue
@@ -221,7 +226,7 @@ def _extract_track(track, instrument_key, to_ms, multiplier_note=None):
         ordered_ticks = sorted(level_masks.keys())
         levels_out[level_key] = {
             'notes': {
-                'time_ms': np.array([to_ms(t) for t in ordered_ticks]),
+                'time_ms': to_ms_array(ordered_ticks),
                 'lanes': np.array([level_masks[t] for t in ordered_ticks], dtype=np.uint8),
             },
             # same shared track-wide spans duplicated onto every level
@@ -256,8 +261,13 @@ def mid_notes(mid_source, multiplier_note=None):
 
     tempos, sorted_ticks, cum_ms = map_mid_tempo(mid)
 
+    tempo_arrs = tempo_arrays(tempos, sorted_ticks, cum_ms)
+
     def to_ms(tick):
         return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
+
+    def to_ms_array(ticks):
+        return ticks_to_ms(ticks, tick_res, *tempo_arrs)
 
     track_map = {t.name.strip(): t for t in mid.tracks if t.name}
 
@@ -272,7 +282,7 @@ def mid_notes(mid_source, multiplier_note=None):
         if track is None:
             continue  # this instrument just isn't in the file - not an error
 
-        stream = _extract_track(track, instrument_key, to_ms, multiplier_note)
+        stream = _extract_track(track, instrument_key, to_ms, to_ms_array, multiplier_note)
         if stream is not None:
             instruments_out[instrument_key] = stream
 
