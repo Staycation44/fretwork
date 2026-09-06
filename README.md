@@ -56,7 +56,7 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 ## 2. Building a cache
 
-`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one consolidated cache file containing every song's note data and metadata. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~12 minutes on a ~3k song library - more if more midi files, less if more charts).
+`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one consolidated cache file containing every song's note data and metadata. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~8 minutes on a ~3k song library - more if more midi files, less if more charts).
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
@@ -96,8 +96,7 @@ The raw NPS/VPS details and N/V/COV formula components are dropped, but they can
 
 **Full D formula, Remap tables, & CalcTier detail in `Methodology.md`**
 
-**In the metrics spreadsheet / render header, you'll see D translated two ways:**
-
+In the metrics spreadsheet / render header, you'll see D translated two ways:
 - **RemapDiff (0–6):** A manual grouping, calibrated to roughly match the percentage of official releases across the seven tiers. Roughly, how would this have been tiered in a Rock Band game (capped at 6). Guitar (plus Co-op/Rhythm), Bass, and Keys each have their own bin edges, fit against that instrument's own `diff_*` distribution.
 - **CalcTier:** A continuous, log-scaled tiering calculation. Every 0.44 natural-log increase in D over a baseline value increments the tier by one. This value is not capped, so officials at Dragonforce level end up in 7+, and a lot of notable customs are 10+. Unlike RemapDiff, the baseline/increment constants are currently shared across all instruments rather than fit per-instrument.
 
