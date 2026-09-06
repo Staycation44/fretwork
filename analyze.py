@@ -24,6 +24,7 @@ D remains calculated per level
 """
 import argparse
 import pathlib
+import time
 
 import pandas as pd
 import tqdm
@@ -39,7 +40,6 @@ COLUMN_ORDER = [
     'pNPS', 'aNPS', 'medNPS', 'stdNPS', 'pVPS', 'aVPS', 'medVPS', 'stdVPS',
     'N', 'V', 'COV',
 ]
-
 
 # metrics: pre-computed density metrics for this level (expert)
 # None needs to recompute
@@ -71,10 +71,36 @@ def song_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor_
         'CalcTier': anchor_tier,
     }
 
+#Save clock, since that's slower than most of the analysis...
+def _save_workbook(writer):
+    start = time.time()
+    print("Saving spreadsheet...", end='', flush=True)
+    writer.close()
+    end = time.time()
+    print(f" done {end - start:.1f}s")
+
+# Parses config.XLSX_LEVELS / --xlsx-levels ("X", "EX", "EMHX", "ALL")
+def _resolve_levels(spec):
+    spec = (spec or 'ALL').strip().upper()
+    if spec == 'ALL':
+        return set(instruments.LEVEL_KEYS)
+    selected = {instruments.SUFFIX_TO_LEVEL[ch] for ch in spec if ch in instruments.SUFFIX_TO_LEVEL}
+    bad = [ch for ch in spec if ch not in instruments.SUFFIX_TO_LEVEL]
+    if bad:
+        raise ValueError(f"Unrecognized level letter(s) {bad} in XLSX_LEVELS '{spec}' (expected E/M/H/X or ALL)")
+    if not selected:
+        raise ValueError(f"XLSX_LEVELS '{spec}' resolved to no levels")
+    return selected
+
+#------------------
+# MAIN ANALYZE CODE
+#------------------
 # run the analysis - loading from selected/default cache
-def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=None):
+def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=None, xlsx_levels=None):
     header = header or config.HEADER
     diff_mode = diff_mode if diff_mode is not None else config.DIFF_WRITE_MODE
+    xlsx_levels = xlsx_levels if xlsx_levels is not None else config.XLSX_LEVELS
+    selected_levels = _resolve_levels(xlsx_levels)
 
     if diff_mode == "Restore":
         result = ini_updater.sync_difficulty("Restore", header, config.CACHE_DIR)
@@ -105,7 +131,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
     print(f"\nAnalyzing {header} cache")
     for song_path, instrument_key, levels in tqdm.tqdm(
-        all_song_instruments, desc="Computing metrics", unit="song/instrument"
+        all_song_instruments, desc="Computing metrics", unit="songs"
     ):
         song = cache['songs'][song_path]
         codes_for_instrument = song.get('codes', {}).get(instrument_key, {})
@@ -122,6 +148,8 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             }
 
         for level_key, inst_entry in levels.items():
+            if level_key not in selected_levels:
+                continue
             total += 1
             code = codes_for_instrument.get(level_key)
 
@@ -149,6 +177,11 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     ts = timestamp.ext_ts(cache_path, 'cache', header) if cache_path else None
     xlsx_out = timestamp.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
 
+    # EXTRA_METRICS=False drops the hidden diagnostic columns (raw NPS/VPS pieces, N/V/COV) instead of hiding
+    column_order = COLUMN_ORDER if config.EXTRA_METRICS else [
+        c for c in COLUMN_ORDER if c not in xlsx_format.DEFAULT_HIDDEN_COLS
+    ]
+
     # rows are grouped per sheet up front so the write bar knows its total before it starts
     sheet_rows = {
         sheet_name: [row for instrument_key in group_keys for row in rows_by_instrument[instrument_key]]
@@ -158,10 +191,10 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     total_rows = sum(len(rows) for rows in sheet_rows.values())
 
     frames = {}
-    print()
-    with pd.ExcelWriter(xlsx_out, engine='openpyxl') as writer:
+    writer = pd.ExcelWriter(xlsx_out, engine='openpyxl')
+    try:
         # counted in rows
-        with tqdm.tqdm(total=total_rows, desc="Writing spreadsheet", unit="row") as write_bar:
+        with tqdm.tqdm(total=total_rows, desc="Writing spreadsheet", unit="rows") as write_bar:
             for sheet_name, rows in sheet_rows.items():
                 write_bar.set_postfix_str(sheet_name)
 
@@ -171,9 +204,9 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                 # Difficulty comes from song.ini as a string, convert to numeric and fill missing with -1
                 df['Difficulty'] = pd.to_numeric(df['Difficulty'], errors='coerce').fillna(-1).astype(int)
 
-                df = df[COLUMN_ORDER]
+                df = df[column_order]
                 float_cols = [c for c in df.columns if c in xlsx_format.FLOAT_COLS or c == 'D']
-                df[float_cols] = df[float_cols].round(2)
+                df[float_cols] = df[float_cols].astype('float32').round(2)
                 df = df.sort_values('D', ascending=False)
 
                 sheet = sheet_name[:31]  # Excel sheet-name limit
@@ -181,27 +214,28 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                 # style_sheet advances the bar per column
                 xlsx_format.style_sheet(writer.sheets[sheet], df, progress=write_bar.update)
                 frames[sheet_name] = df
+    except BaseException:
+        writer.close()
+        raise
 
-            write_bar.set_postfix_str('saving')
-        # workbook is written to disk here, on ExcelWriter's context exit
+    # workbook save clock call
+    _save_workbook(writer)
 
-
-    print(f"\n{header} analysis complete:")
-    print(  f"Cache version:  {gen_on}")
-    print(  f"Rows written:   {total}")
-
-    print(f"\nRows per instrument/level:")
+    # main terminal output
+    print(f"\n{header} analysis complete")
+    print(f"{total} Rows written:")
     name_width = max(len(instruments.DISPLAY_NAMES[key]) for key in instruments.INSTRUMENT_KEYS)
-    level_labels = [instruments.LEVEL_DISPLAY_NAMES[level] for level in instruments.LEVEL_KEYS]
+    active_levels = [level for level in instruments.LEVEL_KEYS if level in selected_levels]
+    level_labels = [instruments.LEVEL_DISPLAY_NAMES[level] for level in active_levels]
     col_width = max(max(len(label) for label in level_labels), 5) + 2
     print(" " * (name_width + 4) + "".join(label.rjust(col_width) for label in level_labels))
     for instrument_key in instruments.INSTRUMENT_KEYS:
         counts = row_counts[instrument_key]
-        if not any(counts.values()):
+        if not any(counts[level] for level in active_levels):
             continue
         name = instruments.DISPLAY_NAMES[instrument_key]
         print(f"    {name:<{name_width}}" + "".join(
-            str(counts[level]).rjust(col_width) for level in instruments.LEVEL_KEYS
+            str(counts[level]).rjust(col_width) for level in active_levels
         ))
 
     print(f"\nSpreadsheet written: {pathlib.Path(xlsx_out).resolve()}")
@@ -219,9 +253,13 @@ def main():
                               "(anchored to the Expert-level D - see module docstring), or "
                               "Restore every instrument's originals from backup (skips metrics/"
                               "spreadsheet generation entirely). Default: config.DIFF_WRITE_MODE.")
+    parser.add_argument('--xlsx-levels', default=None,
+                         help="Which EMHX levels to emit, e.g. X, EX, EMHX, or ALL. "
+                              "Default: config.XLSX_LEVELS.")
     args = parser.parse_args()
 
-    analyze(cache_path=args.cache, header=args.header, diff_mode=args.diff_mode)
+    analyze(cache_path=args.cache, header=args.header, diff_mode=args.diff_mode,
+            xlsx_levels=args.xlsx_levels)
 
 
 if __name__ == '__main__':

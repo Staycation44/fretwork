@@ -2,7 +2,7 @@
 
 This is an analysis tool intended to calculate Difficulty across Easy/Medium/Hard/Expert for Guitar/Bass/Keys from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
 
-Every 5-fret instrument is supported: **Guitar, Co-op Guitar, Rhythm Guitar, Bass, and Keys** - each is parsed, cached, and scored independently at every level charted (Easy, Medium, Hard, Expert).
+Every 5-fret instrument is supported: **Guitar, Co-op Guitar, Rhythm Guitar, Bass, and Keys.** Each is parsed, cached, and scored independently at every level charted (Easy, Medium, Hard, Expert).
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
 
@@ -14,11 +14,12 @@ Libraries required: **pandas, numpy, tqdm, mido, matplotlib, and openpyxl**
 To use the tool setup **config** and run these in order:
 
 1. **Build** - Scan a library, save everything into a cache file, & creates a backup of original difficulties
-2. **Analyze** - Turn Build's cache into an .xlsx spreadsheet including song metadata and calculated metrics for every song/instrument combo. Optionally, applies calculated difficulty to `song.ini` files for use in game, or restores them back to their originals from the backup
+2. **Analyze** - Turn Build's cache into an .xlsx spreadsheet including song metadata and calculated metrics for every song/instrument combo. 
+Optionally, applies calculated difficulty to `song.ini` files for use in-game, or restores them back to their originals from the backup
 3. **Render** - Output a PNG graph of metrics over time for one or more song/instrument combos based on a retrieval code from the spreadsheet
 
 ## Index <!-- omit in toc -->
-- [1. Setup: `config.py`](#1-setup-configpy)
+- [1. Setup your Config](#1-setup-your-config)
 - [2. Building a cache](#2-building-a-cache)
 - [3. Analyzing a cache](#3-analyzing-a-cache)
 - [4. Rendering song graphs](#4-rendering-song-graphs)
@@ -27,7 +28,7 @@ To use the tool setup **config** and run these in order:
 
 ---
 
-## 1. Setup: `config.py`
+## 1. Setup your Config
 
 Before running anything, open `config.py` and check these values:
 
@@ -61,11 +62,11 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 ## 2. Building a cache
 
-`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one consolidated cache file containing every song's note data and metadata. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~10 minutes on a ~3k song library - more if more midi files, less if more charts).
+`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one consolidated cache file containing every song's note data and metadata. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~12 minutes on a ~3k song library - more if more midi files, less if more charts).
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
-Additionally, this always backs up your original difficulties as it scans, regardless of anything set in `config.py` - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you ever want to.
+Additionally, this always backs up your original difficulties as it scans, regardless of anything set in `config.py` - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you want to.
 
 **Outputs:**
 
@@ -81,20 +82,23 @@ Additionally, this always backs up your original difficulties as it scans, regar
 
 ## 3. Analyzing a cache
 
-`analyze.py` loads the most recent cache for your config's `HEADER`, computes density/difficulty metrics for every song/instrument/level combo in it, and writes a single **.xlsx spreadsheet**. This is the main output for browsing the library.
+`analyze.py` loads the most recent cache for your config's `HEADER`, computes density/difficulty metrics for every song/instrument/selected level combo in it, and writes a **.xlsx spreadsheet**. This is the main output for browsing the library.
 
-Optionally, `analyze.py` can also update each instrument's `diff_*` tag for use in game (`diff_guitar`, `diff_guitar_coop`, `diff_rhythm`, `diff_bass`, `diff_keys`). You can also restore all of them to the original backups from Build. This option runs via args or a setting in the config.
+Optionally, `analyze.py` can also update each instrument's `song.ini` `diff_*` tag for use in-game. You can also restore all of them to the original assigned value. This option runs via args or `DIFF_WRITE_MODE` in the config.
 
 **Outputs:**
 
-An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx`, with one tab per instrument group that has data in the cache (`Guitar` - combining Guitar/Co-op/Rhythm, `Bass`, `Keys`). Easy/Medium/Hard/Expert share the same tab as a filterable `Level` column - each song/instrument contributes up to four rows, one per level it charts, colored to match (a lighter take on Rock Band's tier colors).
-
-
-- **Retrieval code** - an 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) and an instrument letter (`G`/`C`/`R`/`B`/`K`), e.g. `04821993XG` for an Expert Guitar song - used to render graphs
+An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx` with:
+- One tab per instrument group that has data in the cache (`Guitar` - combining Guitar/Co-op/Rhythm, `Bass`, `Keys`). Easy/Medium/Hard/Expert share the same tab in the `Level` column
+- **Retrieval codes** - an 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) and an instrument letter (`G`/`C`/`R`/`B`/`K`), e.g. `04821993XG` for an Expert Guitar song - used to render graphs
 - Metadata: Song Title, Artist, Level, Type (Lead/Co-op/Rhythm/Bass/Keys), Charter, Release/Source, Difficulty (song.ini diff tags)
 - The difficulty metrics & updated Remap/CalcTier numbers
 
-Each tab is formatted for browsing. The raw NPS/VPS details and N/V/COV formula components are included but hidden by default - unhide them if you want to see the components behind D.
+Each tab is formatted for browsing using `xlsx_format.py`
+
+By Default the output is Expert only (for performance), using `XLSX_LEVELS` in the config you can pick the mix of Easy/Medium/Hard/Expert you want in the sheet.
+
+ The raw NPS/VPS details and N/V/COV formula components are dropped, they can be included as hidden columns by using `EXTRA_METRICS = True` in the config. 
 
 #### 5-Fret D Formula <!-- omit in toc -->
 
@@ -103,14 +107,14 @@ $$
 D = N \cdot V \cdot CoV
 $$
 
-D/N/V/COV are computed per level - a song's Medium chart gets its own D from its own notes
+D/N/V/COV are computed per E/M/H/X level.
 
 **In the metrics spreadsheet / render header, you'll see D translated two ways:**
 
 - **RemapDiff (0–6):** A manual grouping, calibrated to roughly match the percentage of official releases across the seven tiers. Roughly, how would this have been tiered in a Rock Band game (capped at 6). Guitar (plus Co-op/Rhythm), Bass, and Keys each have their own bin edges, fit against that instrument's own `diff_*` distribution.
 - **CalcTier:** A continuous, log-scaled tiering calculation. Every 0.44 natural-log increase in D over a baseline value increments the tier by one. This value is not capped, so officials at Dragonforce level end up in 7+, and a lot of notable customs are 10+. Unlike RemapDiff, the baseline/increment constants are currently shared across all instruments rather than fit per-instrument.
 
-**RemapDiff and CalcTier are computed once per song/instrument, from the Expert level's D only** - displayed for all levels and written/restored per song.ini as there are not independent level ratings.
+**RemapDiff and CalcTier are computed once per song/instrument, from the Expert level's D only**
 
 **Optional arguments:**
 
@@ -131,7 +135,7 @@ D/N/V/COV are computed per level - a song's Medium chart gets its own D from its
 
 `python render.py [retrieval code]`
 
-`render.py` draws one PNG graph of difficulty over time for a specific song/instrument/level combo, using its retrieval code from the metrics spreadsheet. A retrieval code is the 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) then a single-letter instrument suffix (`G`, `C`, `R`, `B`, `K`). Make sure the header in config matches the spreadsheet/library you are rendering from.
+`render.py` draws one PNG graph of difficulty over time for a specific song/instrument/level combo, using its retrieval code. A retrieval code is the 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) then an instrument letter (`G`, `C`, `R`, `B`, `K`). Make sure the header in config matches the spreadsheet/library you are rendering from.
 
 **You can render several at once, any mix of instruments and levels:**
 
@@ -167,7 +171,7 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - RB style band diff once all instruments are in
 - Retesting duration and ways to include it (GHVH outliers) - *very annoying*
 - Negative weighting for long empty or long slow sections (related to duration changes) - *may make short songs worse?*
-- scoring by totals (as opposed to average), type of notes (singles by type, chords by type)
+- scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
 - D by section - help sort out solo spikes even if not in a solo event (older GH games)
 - Section names for renders
 - Including strum/hopo/tap state by note in the cache

@@ -8,8 +8,6 @@ Formatting:
     - '-1' or missing difficulty placeholder gets a separate white background so it doesn't skew the scale
     - Level (Easy/Medium/Hard/Expert) gets a fixed categorical fill
     - Raw NPS/VPS breakdown and the N/V/COV formula components are hidden, not deleted
-
-progress bar data to Analyze via the `progress` parameter
 """
 
 import pandas as pd
@@ -108,7 +106,6 @@ def _body_style(wb, is_scaled, is_float):
     return _named_style(wb, name, **attrs)
 
 
-# progress
 def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS,
                  blank_predicates=BLANK_PREDICATES, level_colors=LEVEL_FILL_COLORS,
                  freeze_at=FREEZE_AT, progress=None):
@@ -116,21 +113,6 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
     columns = list(df.columns)
     scaled_set = set(scaled_cols)
     wb = ws.parent
-
-    # Progress is reported in whole rows
-    total_ticks = 2 * n_cols
-    ticks_done = 0
-    rows_emitted = 0
-
-    def tick():
-        nonlocal ticks_done, rows_emitted
-        if progress is None:
-            return
-        ticks_done += 1
-        target = int(round(n_rows * ticks_done / total_ticks)) if total_ticks else n_rows
-        if target > rows_emitted:
-            progress(target - rows_emitted)
-            rows_emitted = target
 
     blank_style = _named_style(wb, 'FW_Blank', font=BODY_FONT, border=THIN_BORDER, fill=WHITE_FILL)
     header_style = _named_style(wb, 'FW_Header', font=HEADER_FONT, alignment=HEADER_ALIGN)
@@ -182,7 +164,8 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
             if is_scaled:
                 _diff_scale(ws, get_column_letter(c), list(range(2, n_rows + 2)))
 
-        tick()
+        if progress is not None:
+            progress()
 
     ws.auto_filter.ref = ws.dimensions
 
@@ -193,4 +176,3 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
         ws.column_dimensions[get_column_letter(i)].width = min(max(longest + 2, 6), 40)
         if col_name in hidden_cols:
             ws.column_dimensions[get_column_letter(i)].hidden = True
-        tick()
