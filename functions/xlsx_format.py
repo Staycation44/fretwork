@@ -4,11 +4,13 @@ XLSX_FORMAT - Styling pass applied to output after ANALYZE
 Formatting:
     - Frozen header row / leading columns (Code / Song Title / Artist)
     - autofilter & auto-fit column widths
-    - Green<yellow<red color scale on difficulties
-    - '-1' placeholder gets a separate white background so it doesn't skew the scale
+    - Green<yellow<red color scale on difficulties (Official diff, D, RemapDiff, CalcTier)
+    - '-1' or missing difficulty placeholder gets a separate white background so it doesn't skew the scale
+    - Level (Easy/Medium/Hard/Expert) gets a fixed categorical fill
     - Raw NPS/VPS breakdown and the N/V/COV formula components are hidden, not deleted
 """
 
+import pandas as pd
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, NamedStyle
 from openpyxl.formatting.rule import ColorScaleRule
@@ -33,6 +35,25 @@ SCALED_COLS = ['Difficulty', 'D', 'RemapDiff', 'CalcTier']
 DEFAULT_HIDDEN_COLS = ['pNPS', 'aNPS', 'medNPS', 'stdNPS',
                         'pVPS', 'aVPS', 'medVPS', 'stdVPS',
                         'N', 'V', 'COV']
+
+# columns where a blank/NaN value is a real "no data" state, not a gap to fill in - each
+# maps to a predicate identifying which raw values in that column count as blank.
+# Difficulty's '-1' is analyze.py's placeholder for "no diff_* tag in song.ini"; RemapDiff/
+# CalcTier being NaN means "no Expert chart to anchor against for this instrument" (EMHX)
+BLANK_PREDICATES = {
+    'Difficulty': lambda v: v == -1,
+    'RemapDiff': pd.isna,
+    'CalcTier': pd.isna,
+}
+
+# fixed per-level fill, lighter versions of RB's tier colors - a category, not a gradient
+LEVEL_FILL_COLORS = {
+    'Easy':   "C6EFCE",
+    'Medium': "BDD7EE",
+    'Hard':   "FFE5B4",
+    'Expert': "FFC7CE",
+}
+LEVEL_COL = 'Level'
 
 FREEZE_AT = "D2"  # keeps Code / Song Title / Artist visible
 
@@ -86,41 +107,57 @@ def _body_style(wb, is_scaled, is_float):
 
 
 def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS,
-                 sentinel_col='Difficulty', sentinel_value=-1, freeze_at=FREEZE_AT):
+                 blank_predicates=BLANK_PREDICATES, level_colors=LEVEL_FILL_COLORS,
+                 freeze_at=FREEZE_AT):
     n_rows, n_cols = df.shape
     columns = list(df.columns)
     scaled_set = set(scaled_cols)
     wb = ws.parent
 
-    sentinel_style = _named_style(wb, 'FW_Sentinel', font=BODY_FONT, border=THIN_BORDER, fill=WHITE_FILL)
+    blank_style = _named_style(wb, 'FW_Blank', font=BODY_FONT, border=THIN_BORDER, fill=WHITE_FILL)
     header_style = _named_style(wb, 'FW_Header', font=HEADER_FONT, alignment=HEADER_ALIGN)
     header_scaled_style = _named_style(wb, 'FW_HeaderScaled', font=HEADER_FONT,
                                         alignment=HEADER_ALIGN, border=THIN_BORDER)
 
+    # one named style per level value, built once and reused across every row
+    level_styles = {
+        value: _named_style(wb, f'FW_Level_{value}', font=BODY_FONT,
+                             fill=PatternFill(start_color=color, end_color=color, fill_type="solid"))
+        for value, color in level_colors.items()
+    }
+
     ws.freeze_panes = freeze_at
     ws.row_dimensions[1].height = 20
 
-    # style the header + every column's body in one pass, then add the color scale for
-    # scaled columns using the sentinel-aware row list we already have on hand
+    # style the header + every column's body in one pass, then add the color scale
     for c, col_name in enumerate(columns, start=1):
         is_scaled = col_name in scaled_set
         is_float = col_name in FLOAT_COLS
-        is_sentinel_col = col_name == sentinel_col
+        is_blank_checked = col_name in blank_predicates
+        is_level = col_name == LEVEL_COL
 
         ws.cell(row=1, column=c).style = header_scaled_style if is_scaled else header_style
         normal_style = _body_style(wb, is_scaled, is_float)
 
-        if is_sentinel_col:
+        if is_level:
+            values = df[col_name].to_numpy()
+            for i, r in enumerate(range(2, n_rows + 2)):
+                ws.cell(row=r, column=c).style = level_styles.get(values[i], normal_style)
+
+        elif is_blank_checked:
+            predicate = blank_predicates[col_name]
             values = df[col_name].to_numpy()
             real_rows = []
             for i, r in enumerate(range(2, n_rows + 2)):
                 cell = ws.cell(row=r, column=c)
-                if values[i] == sentinel_value:
-                    cell.style = sentinel_style
+                if predicate(values[i]):
+                    cell.style = blank_style
                 else:
                     cell.style = normal_style
                     real_rows.append(r)
-            _diff_scale(ws, get_column_letter(c), real_rows)
+            if is_scaled:
+                _diff_scale(ws, get_column_letter(c), real_rows)
+
         else:
             for r in range(2, n_rows + 2):
                 ws.cell(row=r, column=c).style = normal_style
@@ -131,7 +168,8 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
 
     # auto-fit column widths, hiding the raw NPS/VPS/formula columns
     for i, col_name in enumerate(columns, start=1):
-        longest = max(df[col_name].astype(str).map(len).max(), len(col_name))
+        lengths = df[col_name].apply(lambda v: 0 if pd.isna(v) else len(str(v)))
+        longest = max(lengths.max(), len(col_name))
         ws.column_dimensions[get_column_letter(i)].width = min(max(longest + 2, 6), 40)
         if col_name in hidden_cols:
             ws.column_dimensions[get_column_letter(i)].hidden = True

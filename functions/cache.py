@@ -8,20 +8,23 @@ Shape:
     {
         'generated_at': str,
         'search_path':  str,
-        'codes':        {code: song_path},   # code = 8-digit song hash + instrument suffix
+        'codes':        {code: song_path},   # code = 8-digit song hash + level letter + instrument letter
         'songs': {
             song_path: {
                 'song_path':     str,
-                'meta':          {...},   # trimmed ini row, incl. per-instrument Difficulty dict
+                'meta':          {...},   # trimmed ini row, incl. per-instrument Level dict (Expert-referenced)
                 'source_format': 'chart' | 'mid',
-                'codes':         {instrument_key: code, ...},
+                'codes':         {instrument_key: {level_key: code, ...}, ...},
                 'instruments': {
                     instrument_key: {
-                        'notes': {
-                            'time_ms': ndarray,   # sorted
-                            'lanes':   ndarray uint8,  # bitmask, bit N = lane N
+                        level_key: {
+                            'notes': {
+                                'time_ms': ndarray,   # sorted
+                                'lanes':   ndarray uint8,  # bitmask, bit N = lane N
+                            },
+                            'spans': {'star_power': [(ms, ms)...], 'solo': [...]},
                         },
-                        'spans': {'star_power': [(ms, ms)...], 'solo': [...]},
+                        ...  # only levels actually charted for this instrument
                     },
                     ...  # only instruments actually present for this song
                 },
@@ -31,15 +34,18 @@ Shape:
         'dropped':  {counter_name: int, ...},
     }
 
+Every level charted for an instrument is cached (whatever combination of E/M/H/X)
+
 Caches should be managed based on timestamp / generation time & date
 
 When generated with errors, a CSV is produced alongside the cache with details
 
-Retrieval codes are per (song, instrument): the 8-digit song hash with a single-letter instrument suffix 
-Render can go straight from a code to the right instrument's note stream without a separate flag
+Retrieval codes are per the 8-digit song hash + a level (E/M/H/X) + instrument (G/C/R/B/K)
+'04821993' + Expert + Bass -> '04821993XB'. 
+Render uses the code to define the instrument/level
 
-Since the 8-digit part is already unique per song before any suffix is added, 
-appending a suffix can't introduce a new collision between two different songs
+Since the 8-digit part is already unique per song before any suffix is added,
+appending suffixes can't introduce a new collision between two different songs
 """
 
 import hashlib
@@ -48,8 +54,9 @@ from datetime import datetime
 
 from functions import instruments
 
-# Hash-derived retrieval codes digit length (pre instrument suffix)
+# Hash-derived retrieval codes digit length (pre level/instrument suffix)
 CODE_LEN = 8
+SUFFIX_LEN = 2  # level letter + instrument letter
 
 def gen_ts():
     return datetime.now().strftime("%m%d%Y-%H%M")
@@ -84,18 +91,22 @@ def assign_song_codes(song_paths, digits=None):
     return codes
 
 
-# Builds the full song+instrument -> code map for every (song_path, instrument_key) pair
-def assign_codes(song_instrument_pairs, digits=None):
-    song_instrument_pairs = list(song_instrument_pairs)
-    song_paths = sorted({song_path for song_path, _ in song_instrument_pairs})
+# Builds the full song+instrument+level -> code map for every
+# (song_path, instrument_key, level_key) triple present
+def assign_codes(song_instrument_level_triples, digits=None):
+    triples = list(song_instrument_level_triples)
+    song_paths = sorted({song_path for song_path, _, _ in triples})
     song_codes = assign_song_codes(song_paths, digits)
 
     codes = {}
-    for song_path, instrument_key in song_instrument_pairs:
-        suffix = instruments.CODE_SUFFIX[instrument_key]
-        codes[(song_path, instrument_key)] = song_codes[song_path] + suffix
+    for song_path, instrument_key, level_key in triples:
+        suffix = (
+            instruments.LEVEL_CODE_SUFFIX[level_key]
+            + instruments.CODE_SUFFIX[instrument_key]
+        )
+        codes[(song_path, instrument_key, level_key)] = song_codes[song_path] + suffix
 
-    assert len(set(codes.values())) == len(codes), "song+instrument code collision"
+    assert len(set(codes.values())) == len(codes), "song+instrument+level code collision"
     return codes
 
 # Persistence
@@ -108,7 +119,8 @@ def load(cache_path):
     with open(cache_path, 'rb') as f:
         return pickle.load(f)
 
-# Lookup retrieval codes - str or int w/ zero padding on the numeric part, so '421B' and '00000421B' both work
+# Lookup retrieval codes - str or int w/ zero padding
+# '421XB' and '00000421XB' both work, Last 2 chars are level & instrument
 def entries_by_code(cache, codes):
     entries = []
     missing = []
@@ -116,13 +128,20 @@ def entries_by_code(cache, codes):
     for raw in codes:
         raw = str(raw).strip()
 
-        if not raw or not raw[-1].isalpha() or raw[-1].upper() not in instruments.SUFFIX_TO_INSTRUMENT:
+        if len(raw) < SUFFIX_LEN + 1 or not raw[-1].isalpha() or not raw[-2].isalpha():
             missing.append(raw)
             continue
 
-        suffix = raw[-1].upper()
-        digits_part = raw[:-1].zfill(CODE_LEN)
-        full_code = digits_part + suffix
+        instrument_letter = raw[-1].upper()
+        level_letter = raw[-2].upper()
+
+        if (instrument_letter not in instruments.SUFFIX_TO_INSTRUMENT
+                or level_letter not in instruments.SUFFIX_TO_LEVEL):
+            missing.append(raw)
+            continue
+
+        digits_part = raw[:-SUFFIX_LEN].zfill(CODE_LEN)
+        full_code = digits_part + level_letter + instrument_letter
 
         song_path = cache['codes'].get(full_code)
         if song_path is None:
@@ -130,19 +149,29 @@ def entries_by_code(cache, codes):
             continue
 
         song = cache['songs'].get(song_path)
-        instrument_key = instruments.SUFFIX_TO_INSTRUMENT[suffix]
-        inst_entry = (song or {}).get('instruments', {}).get(instrument_key)
+        instrument_key = instruments.SUFFIX_TO_INSTRUMENT[instrument_letter]
+        level_key = instruments.SUFFIX_TO_LEVEL[level_letter]
+
+        instrument_levels = (song or {}).get('instruments', {}).get(instrument_key, {})
+        inst_entry = instrument_levels.get(level_key)
         if inst_entry is None:
             missing.append(raw)
             continue
+
+        # Expert's own note stream, alongside the requested level 
+        # RemapDiff/CalcTier are anchored to Expert row's data
+        # None if this instrument has no Expert chart
+        expert_notes = instrument_levels.get('expert', {}).get('notes')
 
         entries.append({
             **inst_entry,
             'code': full_code,
             'song_path': song_path,
             'instrument': instrument_key,
+            'level': level_key,
             'meta': song['meta'],
             'source_format': song['source_format'],
+            'expert_notes': expert_notes,
         })
 
     return entries, missing

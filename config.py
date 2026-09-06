@@ -26,9 +26,21 @@ SEARCH_PATH = r"C:\Users\user\Documents\Clone Hero\Songs" # edit to your library
 # Identifies the run. Overridable with --header.
 HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 
+#-----------------
+# Analyze Options
+#-----------------
+# XLSX_LEVELS controls which of Easy/Medium/Hard/Expert are written to the spreadsheet
+# takes any combination of "EMHX" or "ALL" (Easy + Expert = "EX", Medium only = "M", etc.)
+XLSX_LEVELS = "ALL"
+
+# This controls whether the spreadsheet includes the extra metrics (VPS/NPS subtypes, N, V, COV)
+# default is false, just producing D, Remap, CalcTier, True to add extra hidden columns for diagnostics
+EXTRA_METRICS = False 
+
 
 # ------------------------
-# song.ini difficulty write-back - OPTIONAL, off by default (DON'T EDIT UNLESS YOU KNOW WHAT YOU'RE DOING)
+# Analyze song.ini difficulty write/restore
+# OPTIONAL, off by default (DON'T EDIT UNLESS YOU KNOW WHAT YOU'RE DOING)
 # ------------------------
 # DIFF_WRITE_MODE controls what ANALYZE does with the calculated difficulty:
 #    None        - don't touch song.ini at all (default)
@@ -40,29 +52,12 @@ HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 # Overridable per-run with --diff-mode on ANALYZE
 # Safest to leave this at None and use --diff-mode when you actually want to override
 
-DIFF_WRITE_MODE = "None" # None | "CalcTier" | "RemapDiff" | "Restore"
+DIFF_WRITE_MODE = None # None | "CalcTier" | "RemapDiff" | "Restore"
 
-
-
-
-#------------------------------
-# RENDER output directory - DON'T NEED TO EDIT, these dump to the tool's folder
-#------------------------------
-RENDER_DIR = 'renders'
-
-# fix for cache/metrics folders 
-OUTPUT_DIR = '.'
-CACHE_DIR = 'caches'
-METRICS_DIR = 'metrics'
-
-KIND_DIRS = {
-    'cache': CACHE_DIR,
-    'errors': CACHE_DIR,
-    'metrics': METRICS_DIR,
-}
 
 # ----------------
-# Render settings - Edit to select theme, change colors, etc
+# Render settings
+# Edit to select theme, change colors, etc
 # ----------------
 # Light/dark themes change background/text/solo colors - selected via 'mode' in DEFAULTS
 # the accent palette (color_d, color_nps, color_vps, color_star_power) stay in DEFAULTS and is shared
@@ -113,4 +108,20 @@ RENDER_DEFAULT = {
 
     "show_solo_spans": True,
     "show_star_power_spans": False,
+}
+
+#------------------------------
+# RENDER output directory - DON'T NEED TO EDIT, these dump to the tool's folder
+#------------------------------
+RENDER_DIR = 'renders'
+
+# fix for cache/metrics folders 
+OUTPUT_DIR = '.'
+CACHE_DIR = 'caches'
+METRICS_DIR = 'metrics'
+
+KIND_DIRS = {
+    'cache': CACHE_DIR,
+    'errors': CACHE_DIR,
+    'metrics': METRICS_DIR,
 }

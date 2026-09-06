@@ -1,27 +1,34 @@
 """
-CHART_PARSER - Parses notes.chart files into per-instrument note streams (same shape
-produced by mid_parser):
+CHART_PARSER - Parses notes.chart files into per-instrument, per-level note
+streams (same shape produced by mid_parser):
     {
         'song_path': str,
         'source_format': 'chart',
         'resolution': int,
         'instruments': {
             instrument_key: {
-                'notes': {
-                    'time_ms': np.ndarray,   # sorted, one entry per tick
-                    'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
+                'levels': {
+                    level_key: {
+                        'notes': {
+                            'time_ms': np.ndarray,   # sorted, one entry per tick
+                            'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
+                        },
+                        'spans': {
+                            'star_power': [(start_ms, end_ms), ...],
+                            'solo':       [(start_ms, end_ms), ...],
+                        },
+                    },
+                    ...  # one entry per level actually present for this instrument
                 },
-                'spans': {
-                    'star_power': [(start_ms, end_ms), ...],
-                    'solo':       [(start_ms, end_ms), ...],
-                },
-                'dropped': {counter_name: int, ...},
+                'dropped': {counter_name: int, ...},  # summed across whatever levels are present
             },
-            ...  # one entry per recognized instrument section actually present in the file
+            ...  # one entry per recognized instrument actually present in the file
         },
     }
 
-Scope is currently Expert difficulty only
+EMHX: .chart differentiates level purely by section-name prefix
+note numbering (0-4 fret, 7 open) is identical across all four potential sections
+star power read per section, so a given instrument may have different star power counts per level
 
 parse_chart() already read every section in the file (woohoo inefficiency!), so almost no added cost
 
@@ -41,7 +48,7 @@ import numpy as np
 import tqdm
 
 from functions import instruments
-from parsers.timing import map_cum, tick_to_ms
+from parsers.timing import map_cum, tempo_arrays, tick_to_ms, ticks_to_ms
 
 # ------------------------
 # Chart-specific constants
@@ -49,7 +56,7 @@ from parsers.timing import map_cum, tick_to_ms
 OPEN_NOTE = 7
 NOTE_FRETS = {0, 1, 2, 3, 4, OPEN_NOTE}
 
-SP_ID = 2 # 'S 2 <length>' in the difficulty section
+SP_ID = 2 # 'S 2 <length>' in the level section
 
 SOLO = 'solo'
 SOLO_END = 'soloend'
@@ -116,11 +123,13 @@ def _event_text(event):
     return parts[1].strip().strip('"').strip().lower()
 
 
-# Extracts one instrument's note stream from its already-parsed difficulty section
+# Extracts one instrument/level's note stream from its already-parsed section
 # - a {tick_str: event_or_[events]} dict from parse_chart's c_dict
-# Shared scan logic across every 5-fret instrument
-# Returns None if the section has no usable Expert notes
-def _extract_section(section, instrument_key, to_ms):
+# Shared scan logic across every 5-fret instrument and every level
+# note numbering (0-4/7) doesn't change per level
+# to_ms converts one span endpoint, to_ms_array converts the whole note-tick array at once
+# Returns None if the section has no usable notes
+def _extract_section(section, instrument_key, to_ms, to_ms_array):
     allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
     note_frets = NOTE_FRETS if allow_opens else (NOTE_FRETS - {OPEN_NOTE})
 
@@ -188,7 +197,7 @@ def _extract_section(section, instrument_key, to_ms):
 
     return {
         'notes': {
-            'time_ms': np.array([to_ms(t) for t in ordered_ticks]),
+            'time_ms': to_ms_array(ordered_ticks),
             'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
         },
         'spans': {
@@ -208,26 +217,49 @@ def chart_notes(chart_source):
     tick_res = int(c_dict['Song']['Resolution'])
     tempos, sorted_ticks, cum_ms = build_tempo_map(c_dict['SyncTrack'], tick_res)
 
+    tempo_arrs = tempo_arrays(tempos, sorted_ticks, cum_ms)
+
     def to_ms(tick):
         return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
 
+    def to_ms_array(ticks):
+        return ticks_to_ms(ticks, tick_res, *tempo_arrs)
+
     instruments_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
-        section = None
-        for section_name in instruments.CHART_SECTIONS[instrument_key]:
-            section = c_dict.get(section_name)
-            if section:
-                break
+        levels_out = {}
+        # .chart's SP/solo/malformed-event drops per level, but the parser's output is per instrument, so sum across levels
+        instrument_dropped = {}
 
-        if not section:
-            continue  # this instrument just isn't in the file - not an error
+        for level_key in instruments.LEVEL_KEYS:
+            section = None
+            for section_name in instruments.CHART_SECTIONS[instrument_key][level_key]:
+                section = c_dict.get(section_name)
+                if section:
+                    break
 
-        stream = _extract_section(section, instrument_key, to_ms)
-        if stream is not None:
-            instruments_out[instrument_key] = stream
+            if not section:
+                continue  # this instrument/level combo just isn't in the file - not an error
+
+            stream = _extract_section(section, instrument_key, to_ms, to_ms_array)
+            if stream is None:
+                continue
+
+            levels_out[level_key] = {
+                'notes': stream['notes'],
+                'spans': stream['spans'],
+            }
+            for counter_name, count in stream['dropped'].items():
+                instrument_dropped[counter_name] = instrument_dropped.get(counter_name, 0) + count
+
+        if levels_out:
+            instruments_out[instrument_key] = {
+                'levels': levels_out,
+                'dropped': instrument_dropped,
+            }
 
     if not instruments_out:
-        raise ValueError(f"No recognized instrument section with Expert notes found in {chart_source}")
+        raise ValueError(f"No recognized instrument section with usable notes found in {chart_source}")
 
     return {
         'song_path': str(pathlib.Path(chart_source).parent.resolve()),
