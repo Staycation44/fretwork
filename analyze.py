@@ -42,7 +42,6 @@ COLUMN_ORDER = [
 ]
 
 # metrics: pre-computed density metrics for this level (expert)
-# None needs to recompute
 def song_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor_tier,
              metrics=None):
     if metrics is None:
@@ -79,7 +78,7 @@ def _save_workbook(writer):
     end = time.time()
     print(f" done {end - start:.1f}s")
 
-# Parses config.XLSX_LEVELS / --xlsx-levels ("X", "EX", "EMHX", "ALL")
+# Parses EMHX options from config
 def _resolve_levels(spec):
     spec = (spec or 'ALL').strip().upper()
     if spec == 'ALL':
@@ -92,9 +91,6 @@ def _resolve_levels(spec):
         raise ValueError(f"XLSX_LEVELS '{spec}' resolved to no levels")
     return selected
 
-#------------------
-# MAIN ANALYZE CODE
-#------------------
 # run the analysis - loading from selected/default cache
 def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=None, xlsx_levels=None):
     header = header or config.HEADER
@@ -177,7 +173,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     ts = timestamp.ext_ts(cache_path, 'cache', header) if cache_path else None
     xlsx_out = timestamp.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
 
-    # EXTRA_METRICS=False drops the hidden diagnostic columns (raw NPS/VPS pieces, N/V/COV) instead of hiding
+    # EXTRA_METRICS=False drops the hidden diagnostic columns (raw NPS/VPS breakdown, N/V/COV)
     column_order = COLUMN_ORDER if config.EXTRA_METRICS else [
         c for c in COLUMN_ORDER if c not in xlsx_format.DEFAULT_HIDDEN_COLS
     ]
@@ -211,8 +207,8 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
                 sheet = sheet_name[:31]  # Excel sheet-name limit
                 df.to_excel(writer, sheet_name=sheet, index=False)
-                # style_sheet advances the bar per column
-                xlsx_format.style_sheet(writer.sheets[sheet], df, progress=write_bar.update)
+                xlsx_format.style_sheet(writer.sheets[sheet], df)
+                write_bar.update(len(df))
                 frames[sheet_name] = df
     except BaseException:
         writer.close()
@@ -221,7 +217,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     # workbook save clock call
     _save_workbook(writer)
 
-    # main terminal output
+    # analyze complete terminal output
     print(f"\n{header} analysis complete")
     print(f"{total} Rows written:")
     name_width = max(len(instruments.DISPLAY_NAMES[key]) for key in instruments.INSTRUMENT_KEYS)

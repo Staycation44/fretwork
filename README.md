@@ -90,9 +90,9 @@ An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx` with:
 
 Each tab is formatted for browsing using `xlsx_format.py`
 
-By Default the output is Expert only (for performance), using `XLSX_LEVELS` in the config you can pick the mix of Easy/Medium/Hard/Expert you want in the sheet.
+Using `XLSX_LEVELS` in the config you can adjust the mix of Easy/Medium/Hard/Expert you want in the sheet.
 
- The raw NPS/VPS details and N/V/COV formula components are dropped, they can be included as hidden columns by using `EXTRA_METRICS = True` in the config. 
+The raw NPS/VPS details and N/V/COV formula components are dropped, but they can be included as hidden columns by using `EXTRA_METRICS = True` in the config for diagnostics/comparison.
 
 **Full D formula, Remap tables, & CalcTier detail in `Methodology.md`**
 
@@ -111,7 +111,7 @@ By Default the output is Expert only (for performance), using `XLSX_LEVELS` in t
   - `CalcTier`/`RemapDiff` writes selected value into every song's own `diff_*` tag, per instrument
   - `Restore` returns every instrument's `diff_*` values back to its `{header}_BackupData.csv` original, throws errors for songs moved/deleted
   - If not supplied, falls back to `config.DIFF_WRITE_MODE` (default `None`, which leaves song.ini alone)
-- `--xlsx-levels`: which EMHX levels to write rows for. If not supplied, falls back to `config.XLSX_LEVELS` Ddefault `"X"`, Expert only
+- `--xlsx-levels`: which EMHX levels to write rows for. If not supplied, falls back to `config.XLSX_LEVELS`
 
 **Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
 

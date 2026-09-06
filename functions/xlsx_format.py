@@ -108,7 +108,7 @@ def _body_style(wb, is_scaled, is_float):
 
 def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS,
                  blank_predicates=BLANK_PREDICATES, level_colors=LEVEL_FILL_COLORS,
-                 freeze_at=FREEZE_AT, progress=None):
+                 freeze_at=FREEZE_AT):
     n_rows, n_cols = df.shape
     columns = list(df.columns)
     scaled_set = set(scaled_cols)
@@ -163,9 +163,6 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
                 ws.cell(row=r, column=c).style = normal_style
             if is_scaled:
                 _diff_scale(ws, get_column_letter(c), list(range(2, n_rows + 2)))
-
-        if progress is not None:
-            progress()
 
     ws.auto_filter.ref = ws.dimensions
 

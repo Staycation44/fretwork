@@ -29,10 +29,9 @@ HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
 #-----------------
 # Analyze Options
 #-----------------
-# XLSX_LEVELS controls which levels are written to the spreadsheet - Expert is always processed for Remap/Calctier
+# XLSX_LEVELS controls which of Easy/Medium/Hard/Expert are written to the spreadsheet
 # takes any combination of "EMHX" or "ALL" (Easy + Expert = "EX", Medium only = "M", etc.)
-# Default is Expert only
-XLSX_LEVELS = "X"
+XLSX_LEVELS = "ALL"
 
 # This controls whether the spreadsheet includes the extra metrics (VPS/NPS subtypes, N, V, COV)
 # default is false, just producing D, Remap, CalcTier, True to add extra hidden columns for diagnostics
