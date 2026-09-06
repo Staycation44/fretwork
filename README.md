@@ -1,8 +1,6 @@
 # Fretwork - 5-Fret Difficulty Analyzer <!-- omit in toc -->
 
-This is an analysis tool intended to calculate Difficulty across Easy/Medium/Hard/Expert for Guitar/Bass/Keys from .chart & .mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
-
-Every 5-fret instrument is supported: **Guitar, Co-op Guitar, Rhythm Guitar, Bass, and Keys.** Each is parsed, cached, and scored independently at every level charted (Easy, Medium, Hard, Expert).
+Fretwork is an analysis tool to calculate difficulty values across Easy/Medium/Hard/Expert for Guitar/Bass/Keys from notes.chart & notes.mid files (Guitar Hero, Rock Band, Clone Hero, YARG) using Notes Per Second (note density) & Variability Per Second (fret change) metrics.
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
 
@@ -38,25 +36,21 @@ Before running anything, open `config.py` and check these values:
 | `HEADER` | A short name for the library, becomes the prefix on every output file | `"Library"` |
 | `DIFF_WRITE_MODE` | Change from None to allow Analyze to write/restore your `song.ini` files | `"CalcTier"` |
 
-`SEARCH_PATH` - this tool has only been tested on windows devices, but should work on Mac/Linux with updated file paths.
+`SEARCH_PATH` - this tool has only been tested on windows devices, but should work on Mac/Linux with OS-correct file paths.
 
-`HEADER` is how Build defines a cache of song data, and how Analyze & Render search that cache. If you keep multiple libraries, give each one its own `HEADER` so their outputs don't overwrite each other. 
+`HEADER` is how Build defines a cache of song data, and how Analyze & Render search that cache. If you keep multiple libraries, give each one its own `HEADER`.
 
 All outputs are named: `{header}_{kind}_{timestamp}.{ext}`
 
 ex. `Library_cache_08052026-0330.pkl`, `Library_metrics_08052026-0330.xlsx`.
 
-You can also override `SEARCH_PATH` and `HEADER` on the command line (via `--search-path` / `--header`) instead of editing the file, if preferred.
-
-### Render appearance settings <!-- omit in toc -->
+**Render appearance settings**
 
 Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs look:
 
 - `mode`: `"dark"` or `"light"` to set overall color theme
-- `color_d`, `color_nps`, `color_vps`, `color_star_power`: line/fill colors
-- `figsize`, `dpi`: image size and resolution
-- `show_solo_spans` / `show_star_power_spans`: whether solo and star power sections are displayed on the graph
-- `fill_curves`, `fill_alpha`, `linewidth`, `grid_alpha`: general styling
+- adjust hex value colors
+- `show_solo_spans` / `show_star_power_spans`: display SP or Solo sections
 
 ---
 
@@ -82,7 +76,7 @@ Additionally, this always backs up your original difficulties as it scans, regar
 
 ## 3. Analyzing a cache
 
-`analyze.py` loads the most recent cache for your config's `HEADER`, computes density/difficulty metrics for every song/instrument/selected level combo in it, and writes a **.xlsx spreadsheet**. This is the main output for browsing the library.
+`analyze.py` loads the most recent cache for your config's `HEADER`, computes difficulty metrics for every song/instrument/selected level combo, and writes a **.xlsx spreadsheet**. This is the main output for browsing the library.
 
 Optionally, `analyze.py` can also update each instrument's `song.ini` `diff_*` tag for use in-game. You can also restore all of them to the original assigned value. This option runs via args or `DIFF_WRITE_MODE` in the config.
 
@@ -100,14 +94,7 @@ By Default the output is Expert only (for performance), using `XLSX_LEVELS` in t
 
  The raw NPS/VPS details and N/V/COV formula components are dropped, they can be included as hidden columns by using `EXTRA_METRICS = True` in the config. 
 
-#### 5-Fret D Formula <!-- omit in toc -->
-
-**Full formula details in `Methodology.md`**
-$$
-D = N \cdot V \cdot CoV
-$$
-
-D/N/V/COV are computed per E/M/H/X level.
+**Full D formula, Remap tables, & CalcTier detail in `Methodology.md`**
 
 **In the metrics spreadsheet / render header, you'll see D translated two ways:**
 
@@ -121,13 +108,12 @@ D/N/V/COV are computed per E/M/H/X level.
 - `--header`: analyze a different library's most recent cache
 - `--cache`: point at a specific cache file, instead of most recent for the header
 - `--diff-mode`: `CalcTier`, `RemapDiff`, or `Restore`.
-  - `CalcTier`/`RemapDiff` writes that calculation's value into every song's own `diff_*` tag, per instrument - always the Expert-anchored value described above, since song.ini has nowhere to put a per-level number
+  - `CalcTier`/`RemapDiff` writes selected value into every song's own `diff_*` tag, per instrument
   - `Restore` returns every instrument's `diff_*` values back to its `{header}_BackupData.csv` original, throws errors for songs moved/deleted
   - If not supplied, falls back to `config.DIFF_WRITE_MODE` (default `None`, which leaves song.ini alone)
+- `--xlsx-levels`: which EMHX levels to write rows for. If not supplied, falls back to `config.XLSX_LEVELS` Ddefault `"X"`, Expert only
 
 **Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
-
-
 
 ---
 
@@ -135,7 +121,9 @@ D/N/V/COV are computed per E/M/H/X level.
 
 `python render.py [retrieval code]`
 
-`render.py` draws one PNG graph of difficulty over time for a specific song/instrument/level combo, using its retrieval code. A retrieval code is the 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) then an instrument letter (`G`, `C`, `R`, `B`, `K`). Make sure the header in config matches the spreadsheet/library you are rendering from.
+`render.py` draws one PNG graph of difficulty over time for a specific song/instrument/level combo, using its retrieval code. A retrieval code is an 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) then an instrument letter (`G`, `C`, `R`, `B`, `K`) available on the metrics spreadsheet from Analyze. 
+
+**Make sure the header in config matches the spreadsheet/library you are rendering from.**
 
 **You can render several at once, any mix of instruments and levels:**
 
@@ -153,7 +141,7 @@ One PNG per code, named `{code}_{Artist} - {Song}.png`, showing three lines:
 - **Notes** - note density per second
 - **Variability** - how much the fret pattern is changing per second
 
-Solo sections (and optionally star power, if enabled in the config) are shaded on the graph. The header of each image leads with a combined level+instrument label ("Expert Guitar", "Medium Bass", etc), followed by charter, source, file format, and the D value / tier numbers from the metrics spreadsheet - RemapDiff/CalcTier are the same Expert-anchored values described in the Analyze section above, regardless of which level's code you rendered. Available in a light or dark mode depending on the config.
+Solo sections (and optionally star power, if enabled in the config) are shaded on the graph. Graphs are available in light or dark mode depending on the config.
 
 **Optional arguments:**
 - `--header` / `--cache`: pick which library/cache to pull from
@@ -171,8 +159,8 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - RB style band diff once all instruments are in
 - Retesting duration and ways to include it (GHVH outliers) - *very annoying*
 - Negative weighting for long empty or long slow sections (related to duration changes) - *may make short songs worse?*
-- scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
-- D by section - help sort out solo spikes even if not in a solo event (older GH games)
+- Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
+- D by section
 - Section names for renders
 - Including strum/hopo/tap state by note in the cache
 - Actually doing something with note state once it exists (ratios over the song was a good suggestion)

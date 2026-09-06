@@ -1,16 +1,6 @@
 """
 INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instrument:
 
-- update_ini_values() / update_ini_value() / get_ini_value(): patch several keys or one key
-  in [song], or read one back
-- backup_data(): backs up each song's original diff_* values the first time it's seen (BUILD)
-- restore_from_backup(): restores every diff_* tag present in the backup back to its original
-  (every instrument, in a single read/write pass per song.ini)
-- sync_difficulty(): ANALYZE decision, driven by config.DIFF_WRITE_MODE (or --diff-mode) to:
-    write CalcTier/RemapDiff into song.ini's diff_<instrument> tag for one instrument's mode
-    OR run restore_from_backup() when mode is "Restore" (restores every instrument at once)
-    OR do nothing when mode is None
-
 Restore calls restore_from_backup() directly and skips metrics/spreadsheet generation
 
 update_ini_values() patches with targeted line replacements inside the [song] section,
@@ -27,18 +17,14 @@ from functions import instruments
 BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
 VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
 
-
-# song folder -> its song.ini, joined by pathlib so the separator matches song_path's own
+# song folder -> its song.ini, joined by pathlib so the separator matches song_path's
 def song_ini_path(song_path):
     return pathlib.Path(song_path) / "song.ini"
-
 
 # ---------------------------------------------------------------------
 # ini read/write
 # ---------------------------------------------------------------------
 
-# Same BOM/utf-8/cp1252 fallback as parsers.ini_parser._read_text, but
-# keeps the detected encoding around so writes can match it exactly
 def _read_text(file):
     raw = pathlib.Path(file).read_bytes()
     if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
@@ -70,7 +56,7 @@ def _song_section_bounds(lines):
         return start, len(lines)
     return None, None
 
-# Patches any number of key = value lines inside [song], in one read/write pass
+# Patches any number of key = value lines inside [song]
 # Leaves everything else alone, new keys at end
 def update_ini_values(ini_path, values):
     if not values:
@@ -156,8 +142,7 @@ def _existing_backup_paths(backup_csv):
 
 
 # song_path -> {instrument_key: original diff value}, from the backup CSV
-# Used by render.py to show the original difficulty for whichever instrument is rendered
-# Returns {} if no backup exists yet for this header (old caches/metrics)
+# Used by render.py to show the original difficulty
 def load_backup_diffs(header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
     if not backup_csv.exists():
@@ -200,9 +185,7 @@ def backup_data(songs, header, cache_dir):
     return len(new_rows)
 
 
-# Restores every song.ini for header back to its backed-up diff_* values,
-# a blank column means that instrument wasn't charted for that song at backup time / no tag added
-# Every tag for a song is written in a single pass - one read/write per song.ini
+# Restores every song.ini for header back to its backed-up diff_* values
 # Returns (restored_count, failures) if a song folder was moved, deleted, etc
 def restore_from_backup(header, cache_dir):
     backup_csv = backup_csv_path(header, cache_dir)
