@@ -55,18 +55,13 @@ REMAP_BINS = {
 }
 
 # --------------------------------------------
-# CalcTier (log-scaled) params, per group
+# CalcTier (log-scaled) params
 # --------------------------------------------
-# ~One tier per LN_INC of log(D / BASE_D). Shared across all three groups for now
-GUITAR_BASE_D, GUITAR_LN_INC = 7.6, 0.44
-BASS_BASE_D,   BASS_LN_INC   = 7.6, 0.44
-KEYS_BASE_D,   KEYS_LN_INC   = 7.6, 0.44
-
-CALCTIER_PARAMS = {
-    'guitar': (GUITAR_BASE_D, GUITAR_LN_INC),
-    'bass':   (BASS_BASE_D, BASS_LN_INC),
-    'keys':   (KEYS_BASE_D, KEYS_LN_INC),
-}
+# ~One tier per LN_INC of log(D / BASE_D)
+# One shared pair for every group.
+# Split them per calibration group here if/when they're actually fit separately.
+BASE_D = 7.6
+LN_INC = 0.44
 
 
 # RB manual 0-6 fit
@@ -83,13 +78,12 @@ def remap_diff(D, instrument='guitar'):
 
 # log tier calculation
 def calc_tier(D, instrument='guitar'):
-    base_d, ln_inc = CALCTIER_PARAMS[CALIBRATION_GROUP[instrument]]
-    if D < base_d:
+    if D < BASE_D:
         return 0
-    return int(math.floor(math.log(D / base_d) / ln_inc) + 1)
+    return int(math.floor(math.log(D / BASE_D) / LN_INC) + 1)
 
 # D Formula - N/V/COV/D only, instrument-agnostic 
-# Split out from calc_diff so RemapDiff/CalcTier calc can be anchored to Expert level's D
+# Split from the tier calls so RemapDiff/CalcTier can be anchored to the Expert level's D
 def calc_nvcov(metrics):
     pNPS, medNPS, aNPS, stdNPS = metrics['pNPS'], metrics['medNPS'], metrics['aNPS'], metrics['stdNPS']
     pVPS, medVPS, aVPS, stdVPS = metrics['pVPS'], metrics['medVPS'], metrics['aVPS'], metrics['stdVPS']
@@ -115,17 +109,6 @@ def calc_nvcov(metrics):
         'V': V,
         'COV': COV,
         'D': D,
-    }
-
-# D Formula - self-anchored
-def calc_diff(metrics, instrument='guitar'):
-    nvcov = calc_nvcov(metrics)
-    D = nvcov['D']
-
-    return {
-        **nvcov,
-        'RemapDiff': remap_diff(D, instrument),
-        'CalcTier': calc_tier(D, instrument),
     }
 
 # RemapDiff/CalcTier anchored to the Expert level's D

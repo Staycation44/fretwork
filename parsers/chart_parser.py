@@ -7,20 +7,13 @@ streams (same shape produced by mid_parser):
         'resolution': int,
         'instruments': {
             instrument_key: {
-                'levels': {
-                    level_key: {
-                        'notes': {
-                            'time_ms': np.ndarray,   # sorted, one entry per tick
-                            'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
-                        },
-                        'spans': {
-                            'star_power': [(start_ms, end_ms), ...],
-                            'solo':       [(start_ms, end_ms), ...],
-                        },
+                level_key: {
+                    'notes': {
+                        'time_ms': np.ndarray,   # sorted, one entry per tick
+                        'lanes':   np.ndarray uint8,   # bitmask, bit N = lane N
                     },
-                    ...  # one entry per level actually present for this instrument
                 },
-                'dropped': {counter_name: int, ...},  # summed across whatever levels are present
+                ...  # one entry per level actually present for this instrument
             },
             ...  # one entry per recognized instrument actually present in the file
         },
@@ -28,7 +21,6 @@ streams (same shape produced by mid_parser):
 
 EMHX: .chart differentiates level purely by section-name prefix
 note numbering (0-4 fret, 7 open) is identical across all four potential sections
-star power read per section, so a given instrument may have different star power counts per level
 
 parse_chart() already read every section in the file (woohoo inefficiency!), so almost no added cost
 
@@ -40,6 +32,8 @@ Fret ENCODING
     A bitmask rather than a frozenset to support small cache size
 
 NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
+
+DROPPED: star power ('S 2') and solo ('E solo') events are skipped
 """
 
 import pathlib
@@ -48,18 +42,13 @@ import numpy as np
 import tqdm
 
 from functions import instruments
-from parsers.timing import map_cum, tempo_arrays, tick_to_ms, ticks_to_ms
+from parsers.timing import tempo_map, ticks_to_ms
 
 # ------------------------
 # Chart-specific constants
 # ------------------------
 OPEN_NOTE = 7
 NOTE_FRETS = {0, 1, 2, 3, 4, OPEN_NOTE}
-
-SP_ID = 2 # 'S 2 <length>' in the level section
-
-SOLO = 'solo'
-SOLO_END = 'soloend'
 
 
 # ---------------------------------------------------------------------
@@ -94,7 +83,7 @@ def parse_chart(chart_source):
     c_dict.pop('Events', None)
     return c_dict
 
-# SyncTrack 'B <bpm*1000>' markers -> ({tick: bpm}, sorted, cumulative)
+# SyncTrack 'B <bpm*1000>' markers -> tempo arrays for tick -> ms conversion
 def build_tempo_map(sync_track, tick_res):
     tempos = {}
     for tick, markers in sync_track.items():
@@ -107,104 +96,48 @@ def build_tempo_map(sync_track, tick_res):
     if not tempos:
         tempos[0] = 120.0
 
-    sorted_ticks, cum_ms = map_cum(tempos, tick_res)
-    return tempos, sorted_ticks, cum_ms
+    return tempo_map(tempos, tick_res)
 
 
 # ----------------------
 # Note-stream extraction
 # ----------------------
 
-# Solo check
-def _event_text(event):
-    parts = event.split(None, 1)
-    if len(parts) < 2:
-        return ''
-    return parts[1].strip().strip('"').strip().lower()
-
-
 # Extracts one instrument/level's note stream from its already-parsed section
-# - a {tick_str: event_or_[events]} dict from parse_chart's c_dict
 # Shared scan logic across every 5-fret instrument and every level
 # note numbering (0-4/7) doesn't change per level
-# to_ms converts one span endpoint, to_ms_array converts the whole note-tick array at once
 # Returns None if the section has no usable notes
-def _extract_section(section, instrument_key, to_ms, to_ms_array):
+def _extract_section(section, instrument_key, to_ms_array):
     allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
     note_frets = NOTE_FRETS if allow_opens else (NOTE_FRETS - {OPEN_NOTE})
 
     masks_by_tick = {}
-    sp = []
-    solos = []
 
-    dropped = {
-        'unclosed_solo': 0,
-        'malformed_star_power': 0,
-    }
-
-    solo_open_tick = None
-
-    # Tick order matters for solo start/end pairing, so walk sorted.
-    for tick_str in sorted(section.keys(), key=int):
-        events = section[tick_str]
-        tick = int(tick_str)
+    for tick_str, events in section.items():
         events = events if isinstance(events, list) else [events]
 
         mask = 0
-
         for event in events:
             parts = event.split()
-            if not parts:
-                continue
-
-            kind = parts[0]
-
-            if kind == 'N' and len(parts) >= 2:
+            # 'N <fret> <length>' - everything else is skipped
+            if len(parts) >= 2 and parts[0] == 'N':
                 n_val = int(parts[1])
                 if n_val in note_frets:
                     mask |= 1 << n_val
 
-            elif kind == 'S' and len(parts) >= 3:
-                if int(parts[1]) == SP_ID:
-                    length = int(parts[2])
-                    if length > 0:
-                        sp.append((to_ms(tick), to_ms(tick + length)))
-                    else:
-                        dropped['malformed_star_power'] += 1
-
-            elif kind == 'E':
-                text = _event_text(event)
-                if text == SOLO:
-                    if solo_open_tick is not None:
-                        dropped['unclosed_solo'] += 1
-                    solo_open_tick = tick
-                elif text == SOLO_END:
-                    if solo_open_tick is not None:
-                        solos.append((to_ms(solo_open_tick), to_ms(tick)))
-                        solo_open_tick = None
-
         if mask:  # skip ticks that only carried modifiers or phrases
-            masks_by_tick[tick] = mask
-
-    # A solo left open at end of track never closes - dropped, counted.
-    if solo_open_tick is not None:
-        dropped['unclosed_solo'] += 1
+            masks_by_tick[int(tick_str)] = mask
 
     if not masks_by_tick:
         return None
 
-    ordered_ticks = sorted(masks_by_tick.keys())
+    ordered_ticks = sorted(masks_by_tick)
 
     return {
         'notes': {
             'time_ms': to_ms_array(ordered_ticks),
             'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
         },
-        'spans': {
-            'star_power': sp,
-            'solo': solos,
-        },
-        'dropped': dropped,
     }
 
 
@@ -215,12 +148,7 @@ def chart_notes(chart_source):
             raise ValueError(f"Missing required section '{required}' in {chart_source}")
 
     tick_res = int(c_dict['Song']['Resolution'])
-    tempos, sorted_ticks, cum_ms = build_tempo_map(c_dict['SyncTrack'], tick_res)
-
-    tempo_arrs = tempo_arrays(tempos, sorted_ticks, cum_ms)
-
-    def to_ms(tick):
-        return tick_to_ms(tick, tick_res, tempos, sorted_ticks, cum_ms)
+    tempo_arrs = build_tempo_map(c_dict['SyncTrack'], tick_res)
 
     def to_ms_array(ticks):
         return ticks_to_ms(ticks, tick_res, *tempo_arrs)
@@ -228,8 +156,6 @@ def chart_notes(chart_source):
     instruments_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
         levels_out = {}
-        # .chart's SP/solo/malformed-event drops per level, but the parser's output is per instrument, so sum across levels
-        instrument_dropped = {}
 
         for level_key in instruments.LEVEL_KEYS:
             section = None
@@ -239,24 +165,14 @@ def chart_notes(chart_source):
                     break
 
             if not section:
-                continue  # this instrument/level combo just isn't in the file - not an error
+                continue  # this instrument/level combo isn't in the file
 
-            stream = _extract_section(section, instrument_key, to_ms, to_ms_array)
-            if stream is None:
-                continue
-
-            levels_out[level_key] = {
-                'notes': stream['notes'],
-                'spans': stream['spans'],
-            }
-            for counter_name, count in stream['dropped'].items():
-                instrument_dropped[counter_name] = instrument_dropped.get(counter_name, 0) + count
+            stream = _extract_section(section, instrument_key, to_ms_array)
+            if stream is not None:
+                levels_out[level_key] = stream
 
         if levels_out:
-            instruments_out[instrument_key] = {
-                'levels': levels_out,
-                'dropped': instrument_dropped,
-            }
+            instruments_out[instrument_key] = levels_out
 
     if not instruments_out:
         raise ValueError(f"No recognized instrument section with usable notes found in {chart_source}")

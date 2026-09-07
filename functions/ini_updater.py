@@ -6,12 +6,14 @@ Restore calls restore_from_backup() directly and skips metrics/spreadsheet gener
 update_ini_values() patches with targeted line replacements inside the [song] section,
 preserving everything else in the file and preventing the BOM/encoding from being changed
 It will also add any key that doesn't already exist
+
+The backup CSV lives with the cache files
 """
 
 import csv
 import pathlib
 
-from functions import instruments
+from functions import instruments, timestamp
 
 # backup CSV columns: song_path + one column per instrument's actual ini tag name
 BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
@@ -103,35 +105,12 @@ def update_ini_values(ini_path, values):
     _write_text(ini_path, new_text, encoding)
 
 
-# single-key convenience wrapper
-def update_ini_value(ini_path, key, value):
-    update_ini_values(ini_path, {key: value})
-
-
-def get_ini_value(ini_path, key):
-    text, _ = _read_text(ini_path)
-    lines = text.splitlines()
-    start, end = _song_section_bounds(lines)
-    if start is None:
-        return None
-
-    key_lower = key.strip().lower()
-    for line in lines[start:end]:
-        stripped = line.strip()
-        if not stripped or stripped[0] in ';#' or '=' not in stripped:
-            continue
-        k, _, v = stripped.partition('=')
-        if k.strip().lower() == key_lower:
-            return v.strip()
-    return None
-
-
 # ---------------------------------------------------------------------
 # Backup - written by build.py / read by restore_from_backup()
 # ---------------------------------------------------------------------
 
-def backup_csv_path(header, cache_dir):
-    return pathlib.Path(cache_dir) / f"{header}_BackupData.csv"
+def backup_csv_path(header):
+    return timestamp.output_dir('backup') / f"{header}_BackupData.csv"
 
 
 def _existing_backup_paths(backup_csv):
@@ -143,8 +122,8 @@ def _existing_backup_paths(backup_csv):
 
 # song_path -> {instrument_key: original diff value}, from the backup CSV
 # Used by render.py to show the original difficulty
-def load_backup_diffs(header, cache_dir):
-    backup_csv = backup_csv_path(header, cache_dir)
+def load_backup_diffs(header):
+    backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
         return {}
     out = {}
@@ -157,8 +136,8 @@ def load_backup_diffs(header, cache_dir):
     return out
 
 # songs: iterable of (song_path, difficulties) pairs
-def backup_data(songs, header, cache_dir):
-    backup_csv = backup_csv_path(header, cache_dir)
+def backup_data(songs, header):
+    backup_csv = backup_csv_path(header)
     backup_csv.parent.mkdir(parents=True, exist_ok=True)
     existing_paths = _existing_backup_paths(backup_csv)
     is_new = not backup_csv.exists()
@@ -187,8 +166,8 @@ def backup_data(songs, header, cache_dir):
 
 # Restores every song.ini for header back to its backed-up diff_* values
 # Returns (restored_count, failures) if a song folder was moved, deleted, etc
-def restore_from_backup(header, cache_dir):
-    backup_csv = backup_csv_path(header, cache_dir)
+def restore_from_backup(header):
+    backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
         raise FileNotFoundError(f"No backup found for header '{header}' at {backup_csv}")
 
@@ -228,8 +207,8 @@ def restore_from_backup(header, cache_dir):
 # instrument:    which instrument's diff_* tag to write (required for CalcTier/RemapDiff,
 #                unused/omit for Restore - Restore always covers every instrument at once)
 # songs:         iterable of song_path for diff write modes
-# difficulties:  dict song_path -> formula.calc_diff() result for diff write modes
-def sync_difficulty(mode, header, cache_dir, instrument=None, songs=None, difficulties=None):
+# difficulties:  dict song_path -> {'RemapDiff': int, 'CalcTier': int} for diff write modes
+def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None):
     if mode is None:
         return None
 
@@ -237,7 +216,7 @@ def sync_difficulty(mode, header, cache_dir, instrument=None, songs=None, diffic
         raise ValueError(f"Unknown diff mode '{mode}', expected one of {VALID_MODES} or None")
 
     if mode == "Restore":
-        restored, failed = restore_from_backup(header, cache_dir)
+        restored, failed = restore_from_backup(header)
         print(f"Restored {restored} song.inis from backup" +
               (f", {len(failed)} failed" if failed else ""))
         return {"mode": mode, "restored": restored, "failed": failed}

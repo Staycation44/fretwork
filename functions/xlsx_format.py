@@ -36,10 +36,8 @@ DEFAULT_HIDDEN_COLS = ['pNPS', 'aNPS', 'medNPS', 'stdNPS',
                         'pVPS', 'aVPS', 'medVPS', 'stdVPS',
                         'N', 'V', 'COV']
 
-# columns where a blank/NaN value is a real "no data" state, not a gap to fill in - each
-# maps to a predicate identifying which raw values in that column count as blank.
-# Difficulty's '-1' is analyze.py's placeholder for "no diff_* tag in song.ini"; RemapDiff/
-# CalcTier being NaN means "no Expert chart to anchor against for this instrument" (EMHX)
+# Difficulty's '-1' is analyze.py's placeholder for "no diff_* tag in song.ini"
+# RemapDiff/CalcTier being NaN means "no Expert chart to anchor against for this instrument" (EMHX)
 BLANK_PREDICATES = {
     'Difficulty': lambda v: v == -1,
     'RemapDiff': pd.isna,
@@ -106,12 +104,10 @@ def _body_style(wb, is_scaled, is_float):
     return _named_style(wb, name, **attrs)
 
 
-def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS,
-                 blank_predicates=BLANK_PREDICATES, level_colors=LEVEL_FILL_COLORS,
-                 freeze_at=FREEZE_AT):
-    n_rows, n_cols = df.shape
+def style_sheet(ws, df):
+    n_rows = df.shape[0]
     columns = list(df.columns)
-    scaled_set = set(scaled_cols)
+    scaled_set = set(SCALED_COLS)
     wb = ws.parent
 
     blank_style = _named_style(wb, 'FW_Blank', font=BODY_FONT, border=THIN_BORDER, fill=WHITE_FILL)
@@ -123,17 +119,17 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
     level_styles = {
         value: _named_style(wb, f'FW_Level_{value}', font=BODY_FONT,
                              fill=PatternFill(start_color=color, end_color=color, fill_type="solid"))
-        for value, color in level_colors.items()
+        for value, color in LEVEL_FILL_COLORS.items()
     }
 
-    ws.freeze_panes = freeze_at
+    ws.freeze_panes = FREEZE_AT
     ws.row_dimensions[1].height = 20
 
     # style the header + every column's body in one pass, then add the color scale
     for c, col_name in enumerate(columns, start=1):
         is_scaled = col_name in scaled_set
         is_float = col_name in FLOAT_COLS
-        is_blank_checked = col_name in blank_predicates
+        is_blank_checked = col_name in BLANK_PREDICATES
         is_level = col_name == LEVEL_COL
 
         ws.cell(row=1, column=c).style = header_scaled_style if is_scaled else header_style
@@ -145,7 +141,7 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
                 ws.cell(row=r, column=c).style = level_styles.get(values[i], normal_style)
 
         elif is_blank_checked:
-            predicate = blank_predicates[col_name]
+            predicate = BLANK_PREDICATES[col_name]
             values = df[col_name].to_numpy()
             real_rows = []
             for i, r in enumerate(range(2, n_rows + 2)):
@@ -171,5 +167,5 @@ def style_sheet(ws, df, hidden_cols=DEFAULT_HIDDEN_COLS, scaled_cols=SCALED_COLS
         lengths = df[col_name].apply(lambda v: 0 if pd.isna(v) else len(str(v)))
         longest = max(lengths.max(), len(col_name))
         ws.column_dimensions[get_column_letter(i)].width = min(max(longest + 2, 6), 40)
-        if col_name in hidden_cols:
+        if col_name in DEFAULT_HIDDEN_COLS:
             ws.column_dimensions[get_column_letter(i)].hidden = True
