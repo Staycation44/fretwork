@@ -51,17 +51,15 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 - `mode`: `"dark"` or `"light"` to set overall color theme
 - adjust hex value colors
 
-`RENDER_THEMES[mode]` is merged over `RENDER_DEFAULT`, so anything you put in a theme wins. To change an accent color in dark mode only, add that key to the dark theme.
-
 ---
 
 ## 2. Building a cache
 
-`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one consolidated cache file containing every song's note timing and metadata. Note *state* (strum/hopo/tap), note length, and star power/solo phrases are not parsed. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~8 minutes on a ~3k song library - more if more midi files, less if more charts).
+`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one cache file containing every song's note timing and metadata. Note state (strum/hopo/tap), note length, and star power/solo phrases are not parsed. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~8 minutes on a ~3k song library - more if more midi files, less if more charts).
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
-Additionally, this always backs up your original difficulties as it scans, regardless of anything set in `config.py` - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you want to.
+Additionally, this always backs up your original difficulties as it scans - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you want to.
 
 **Outputs:**
 
@@ -143,7 +141,7 @@ One PNG per code, named `{code}_{Artist} - {Song}.png`, showing three lines:
 - **Notes** - note density per second
 - **Variability** - how much the fret pattern is changing per second
 
-The song title sits on the first header line, metadata on the second. Graphs are available in light or dark mode depending on the config.
+Graphs are available in light or dark mode depending on the config.
 
 **Optional arguments:**
 - `--header` / `--cache`: pick which library/cache to pull from
@@ -166,7 +164,7 @@ The song title sits on the first header line, metadata on the second. Graphs are
 - Section names for renders
 - Including strum/hopo/tap state by note in the cache
 - Actually doing something with note state once it exists (ratios over the song was a good suggestion)
-- Star Power Difficulty (how hard are SP phrases to hit?) - *SP/solo phrases are no longer parsed, this would need them restored*
+- Star Power Difficulty (how hard are SP phrases to hit?) - *SP/Solo phrases are no longer parsed*
 - Rhythm changes/variability possibly easier than pattern recognition?
 - Pattern recognition (chords, trills, runs, zigs, quads, quints, anchoring, etc)
 - A strain-based difficulty metric splitting strum vs fret
