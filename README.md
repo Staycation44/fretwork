@@ -157,14 +157,14 @@ Graphs are available in light or dark mode depending on the config.
 - Vocals (Unique data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - Drums (similar data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - RB style band diff once all instruments are in
-- Retesting duration and ways to include it (GHVH outliers) - *very annoying*
-- Negative weighting for long empty or long slow sections (related to duration changes) - *may make short songs worse?*
+- Retesting duration and ways to include it (GHVH outliers) - *very annoying, short song downscaling is not bad but calibration for long is tough*
+  
+**Big rebuilds**
 - Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
-- D by section
-- Section names for renders
-- Including strum/hopo/tap state by note in the cache
-- Actually doing something with note state once it exists (ratios over the song was a good suggestion)
-- Star Power Difficulty (how hard are SP phrases to hit?) - *SP/Solo phrases are no longer parsed*
+- D by section + Section names for renders - *parsing sections is a lot of extra data for the cache*
+- Including strum/hopo/tap state by note in the cache - *not too bad to add, but not adding until there's plan to use them*
+- Actually doing something with note state once it exists - *Ratios over the song was a good suggestion*
+- Star Power Difficulty (how hard are SP phrases to hit?) - *SP no longer parsed*
 - Rhythm changes/variability possibly easier than pattern recognition?
 - Pattern recognition (chords, trills, runs, zigs, quads, quints, anchoring, etc)
 - A strain-based difficulty metric splitting strum vs fret
