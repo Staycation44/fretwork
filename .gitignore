@@ -7,3 +7,5 @@ caches/
 instrument_scan.py
 *.xlsx
 *.xlsx#
+.venv/
+songs/

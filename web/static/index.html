@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+__BOOTSTRAP__
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="bg-body">
+<div class="fw-head bg-body border-bottom px-3 pt-3 pb-2">
+  <div class="d-flex align-items-baseline gap-2">
+    <h1 class="h6 mb-0 fw-semibold" id="brand"></h1>
+    <small class="text-secondary" id="src">__SOURCE__</small>
+  </div>
+  <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+    <input type="search" id="q" class="form-control form-control-sm w-auto"
+           style="min-width:260px">
+    <div class="btn-group btn-group-sm" id="sheets"></div>
+    <div class="btn-group btn-group-sm" id="levels"></div>
+    <button id="cols" class="btn btn-sm btn-outline-secondary"></button>
+    <button id="clear" class="btn btn-sm btn-outline-primary d-none"></button>
+    <span class="ms-auto small text-secondary" id="count"></span>
+  </div>
+</div>
+
+<div class="fw-wrap">
+  <table class="table table-sm table-hover align-middle">
+    <thead><tr id="head"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+
+<div id="dd" class="dropdown-menu shadow p-2"></div>
+<div id="cd" class="dropdown-menu shadow p-2"></div>
+<div id="modal"><div class="mcard"></div></div>
+<div id="hint"><span class="badge text-bg-secondary rounded-pill px-3 py-2"></span></div>
+
+<script type="application/json" id="fw-boot">__BOOT__</script>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

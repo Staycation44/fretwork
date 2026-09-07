@@ -1,0 +1,51 @@
+  /* project-specific only - Bootstrap handles layout, controls, table, dropdown, modal */
+  :root { --fw-accent:#b71fb7; --fw-code:#4aa3e0; }
+  [data-bs-theme="dark"] { --bs-primary:#b71fb7; --bs-link-color-rgb:74,163,224; }
+  body { font-size:13px; }
+  .fw-accent { color:var(--fw-accent); }
+  .btn-check:checked + .btn, .btn-fw.active { background:var(--fw-accent); border-color:var(--fw-accent); color:#fff; }
+  .fw-head { position:sticky; top:0; z-index:1030; }
+  .fw-wrap { overflow:auto; height:calc(100vh - 118px); }
+  .fw-wrap table { margin-bottom:0; }
+  .fw-wrap thead th { position:sticky; top:0; z-index:2; background:var(--bs-tertiary-bg);
+    padding:0; font-size:11px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+  .fw-wrap thead th .thw { display:flex; align-items:center; gap:2px; padding:6px 6px 6px 10px; }
+  .fw-wrap thead th .lbl { cursor:pointer; user-select:none; flex:1; }
+  .fw-wrap thead th.sorted .lbl, .fw-wrap thead th.filtered .flt { color:var(--fw-accent); }
+  .fw-wrap thead th.filtered { background:#2b2233; }
+  .fw-wrap td { padding:5px 10px; white-space:nowrap; vertical-align:middle; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.code { font-family:var(--bs-font-monospace); color:var(--fw-code); cursor:pointer; }
+  td.code:hover { text-decoration:underline; }
+  td.title { max-width:320px; overflow:hidden; text-overflow:ellipsis; }
+  /* level + difficulty colors carried over from xlsx_format.py so the two views read alike */
+  .lvl { color:#1a1a1c; font-weight:600; }
+  .Easy{background:#c6efce}.Medium{background:#bdd7ee}.Hard{background:#ffe5b4}.Expert{background:#ffc7ce}
+  .scale { border-radius:4px; padding:1px 6px; color:#1a1a1c; font-weight:600; }
+  .blank { color:var(--bs-secondary-color); }
+  #dd { position:fixed; width:255px; max-height:min(420px,70vh); overflow:auto;
+        z-index:1050; text-transform:none; letter-spacing:normal; font-size:12px; }
+  #dd .list { max-height:250px; overflow:auto; }
+  #dd .form-check { margin-bottom:0; padding:2px 4px 2px 1.6rem; border-radius:4px; }
+  #dd .form-check:hover { background:var(--bs-tertiary-bg); }
+  #dd .form-check-label { display:flex; width:100%; gap:8px; cursor:pointer; }
+  #dd .form-check-label .v { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #dd .form-check-label .n { margin-left:auto; color:var(--bs-secondary-color); }
+  tbody tr { cursor:pointer; }
+  td.code { font-family:var(--bs-font-monospace); color:var(--bs-secondary-color); }
+  td.code .cp { visibility:hidden; margin-left:6px; opacity:.7; }
+  tr:hover td.code { color:var(--fw-code); }
+  tr:hover td.code .cp { visibility:visible; }
+  td.code .cp:hover { opacity:1; }
+  #cd { position:fixed; width:230px; max-height:min(420px,70vh); overflow:auto; z-index:1050; font-size:12px; }
+  #cd .form-check { margin-bottom:0; padding:2px 4px 2px 1.6rem; border-radius:4px; }
+  #cd .form-check:hover { background:var(--bs-tertiary-bg); }
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.85); display:none;
+           align-items:center; justify-content:center; z-index:1060; padding:24px; }
+  #modal.on { display:flex; }
+  #modal .mcard { max-width:100%; max-height:92vh; overflow:auto; }
+  #modal img { max-width:100%; max-height:86vh; border-radius:8px; display:block; }
+  #modal .mhead { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  #hint { position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+          z-index:1070; opacity:0; transition:opacity .18s; pointer-events:none; }
+  #hint.on { opacity:1; }

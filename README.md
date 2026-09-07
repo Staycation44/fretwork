@@ -15,13 +15,15 @@ To use the tool setup **config** and run these in order:
 2. **Analyze** - Turn Build's cache into an .xlsx spreadsheet including song metadata and calculated metrics for every song/instrument combo. 
 Optionally, applies calculated difficulty to `song.ini` files for use in-game, or restores them back to their originals from the backup
 3. **Render** - Output a PNG graph of metrics over time for one or more song/instrument combos based on a retrieval code from the spreadsheet
+4. **Serve** *(optional)* - Browse the spreadsheet in a browser instead of Excel, with per-column filters and click-a-row-to-see-its-graph
 
 ## Index <!-- omit in toc -->
 - [1. Setup your Config](#1-setup-your-config)
 - [2. Building a cache](#2-building-a-cache)
 - [3. Analyzing a cache](#3-analyzing-a-cache)
 - [4. Rendering song graphs](#4-rendering-song-graphs)
-- [5. Fixes/Extension Ideas](#5-fixesextension-ideas)
+- [5. Browsing in a browser](#5-browsing-in-a-browser)
+- [6. Fixes/Extension Ideas](#6-fixesextension-ideas)
 - [License](#license)
 
 ---
@@ -148,7 +150,37 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 
 ---
 
-## 5. Fixes/Extension Ideas
+## 5. Browsing in a browser
+
+`python serve.py`
+
+`serve.py` serves the most recent metrics spreadsheet for your header as a local web page, so you can sort and filter without opening Excel. It reads the **spreadsheet**, so run Analyze first.
+
+Open **http://localhost:8000** once it starts. It binds `127.0.0.1` only, so nothing outside your machine can reach it. On WSL the URL works in a Windows browser as-is.
+
+**What the page does:**
+
+- **Sort** by clicking a column header, click again to flip direction. Opens sorted by D, hardest first
+- **Filter** any column from the caret next to its name - a checkbox list for things like Part or Remap Tier, a min/max box for wide numeric columns like D or Length. Value counts reflect your other active filters
+- **Search** song, artist, charter or source from the box in the toolbar
+- **Click a row** to render that chart's graph and see it in a lightbox - the same PNG `render.py` produces, written to your render folder. The copy icon on a Code cell copies the retrieval code instead
+- **Columns** button hides any column you do not want, remembered in your browser
+- Friendly column names throughout, with the metric definitions on hover. Unrated songs (`diff_*` of -1) show a dash rather than the raw number
+
+**Optional arguments:**
+- `--header` / `--xlsx`: pick which library's spreadsheet to serve
+- `--cache`: explicit cache path, used for the on-demand graphs
+- `--out-dir`: where rendered PNGs are written (defaults to `render_dir` in `config.py`)
+- `--port`: something other than 8000
+- `--no-bootstrap`: skip the Bootstrap download and use the built-in styles
+
+**Note:** the page's CSS comes from Bootstrap, downloaded once into your cache folder the first time you run Serve and then served from your own machine. After that first run it works offline. If the download fails it falls back to built-in styles and still works.
+
+Stop the server with Ctrl+C.
+
+---
+
+## 6. Fixes/Extension Ideas
 **Fixes:**
 - Midi files misbehaving - *possibly parser drift / file corrruption/truncation?*
 
