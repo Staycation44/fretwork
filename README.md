@@ -50,23 +50,24 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 - `mode`: `"dark"` or `"light"` to set overall color theme
 - adjust hex value colors
-- `show_solo_spans` / `show_star_power_spans`: display SP or Solo sections
 
 ---
 
 ## 2. Building a cache
 
-`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one consolidated cache file containing every song's note data and metadata. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~8 minutes on a ~3k song library - more if more midi files, less if more charts).
+`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid`, reads them, and writes one cache file containing every song's note timing and metadata. Note state (strum/hopo/tap), note length, and star power/solo phrases are not parsed. Every level (Easy/Medium/Hard/Expert) charted for each instrument is cached. This is the slowest step (~8 minutes on a ~3k song library - more if more midi files, less if more charts).
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
-Additionally, this always backs up your original difficulties as it scans, regardless of anything set in `config.py` - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you want to.
+Additionally, this always backs up your original difficulties as it scans - Build never writes to `song.ini` itself, it only records what's there so Analyze can restore it later if you want to.
 
 **Outputs:**
 
 - A `{header}_cache_{timestamp}.pkl` file, the main output used by Analyze and Render
 - A `{header}_errors_{timestamp}.csv` file, only generated if some songs failed to parse, this lists which file failed and why (e.g. missing guitar track, corrupt midi file)
 - A `{header}_BackupData.csv` file, which is a back up that stores all difficulties that were found at the time of building
+
+Cache, errors, and backup all land in `caches/`; the metrics spreadsheet lands in `metrics/`. Both are set in `OUTPUT_DIRS` in `config.py`.
 
 **Optional arguments:**
 - `--search-path`: scan a different folder than the one in `config.py`
@@ -140,7 +141,7 @@ One PNG per code, named `{code}_{Artist} - {Song}.png`, showing three lines:
 - **Notes** - note density per second
 - **Variability** - how much the fret pattern is changing per second
 
-Solo sections (and optionally star power, if enabled in the config) are shaded on the graph. Graphs are available in light or dark mode depending on the config.
+Graphs are available in light or dark mode depending on the config.
 
 **Optional arguments:**
 - `--header` / `--cache`: pick which library/cache to pull from
@@ -156,14 +157,14 @@ Solo sections (and optionally star power, if enabled in the config) are shaded o
 - Vocals (Unique data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - Drums (similar data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - RB style band diff once all instruments are in
-- Retesting duration and ways to include it (GHVH outliers) - *very annoying*
-- Negative weighting for long empty or long slow sections (related to duration changes) - *may make short songs worse?*
+- Retesting duration and ways to include it (GHVH outliers) - *very annoying, short song downscaling is not bad but calibration for long is tough*
+  
+**Bigger rebuilds**
 - Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
-- D by section
-- Section names for renders
-- Including strum/hopo/tap state by note in the cache
-- Actually doing something with note state once it exists (ratios over the song was a good suggestion)
-- Star Power Difficulty (how hard are SP phrases to hit?)
+- D by section + Section names for renders - *parsing sections is a lot of extra data for the cache*
+- Including strum/hopo/tap state by note in the cache - *not adding until there's plan to use them*
+- Actually doing something with note state once it exists - *Ratios over the song was a good suggestion*
+- Star Power Difficulty (how hard are SP phrases to hit?) - *SP no longer parsed*
 - Rhythm changes/variability possibly easier than pattern recognition?
 - Pattern recognition (chords, trills, runs, zigs, quads, quints, anchoring, etc)
 - A strain-based difficulty metric splitting strum vs fret

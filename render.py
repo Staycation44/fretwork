@@ -15,9 +15,8 @@ With no --cache given, RENDER loads the most recently built cache for config.HEA
 Curves are recomputed here rather than read from the cache - doesn't take much processing time
 
 EMHX
-    Each code renders exactly one EMHX level's curves (D/NPS/VPS over time) 
-    RemapDiff/CalcTier in the header are still anchored to the Expert level's
-    Render recalcs expert metrics and uses them to anchor the difficulty remap/tier for every level
+- Each code renders exactly one EMHX level's curves (D/NPS/VPS over time)
+- Render recalcs expert metrics and uses them to anchor the difficulty remap/tier for every level
 """
 
 import argparse
@@ -31,8 +30,7 @@ from functions import curves as curves_mod
 from functions import density, formula, ini_updater, plot, timestamp
 
 
-def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
-                 with_difficulty=True):
+def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None):
     header = header or config.HEADER
 
     if cache is None:
@@ -50,9 +48,9 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
 
     out_dir = out_dir or config.RENDER_DIR
 
-    # Original diffs from backup CSV for header, per instrument - always Expert-referenced
-    # same value regardless of which EMHX level is being rendered
-    original_diffs = ini_updater.load_backup_diffs(header, config.CACHE_DIR)
+    # Original diffs from backup CSV for header
+    # same value regardless of which EMHX level is being rendered (Expert derived)
+    original_diffs = ini_updater.load_backup_diffs(header)
 
     print(f"\nRendering {len(entries)} from {header} cache")
     written = []
@@ -63,18 +61,17 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None,
             continue
 
         difficulty = None
-        if with_difficulty:
-            metrics = density.calc_metrics(entry['notes'])
-            if metrics is not None:
-                expert_notes = entry.get('expert_notes')
-                expert_metrics = density.calc_metrics(expert_notes) if expert_notes is not None else None
-                anchor_remap, anchor_tier = formula.anchor_remap_tier(expert_metrics, entry['instrument'])
+        metrics = density.calc_metrics(entry['notes'])
+        if metrics is not None:
+            expert_notes = entry.get('expert_notes')
+            expert_metrics = density.calc_metrics(expert_notes) if expert_notes is not None else None
+            anchor_remap, anchor_tier = formula.anchor_remap_tier(expert_metrics, entry['instrument'])
 
-                difficulty = {
-                    **formula.calc_nvcov(metrics),
-                    'RemapDiff': anchor_remap,
-                    'CalcTier': anchor_tier,
-                }
+            difficulty = {
+                **formula.calc_nvcov(metrics),
+                'RemapDiff': anchor_remap,
+                'CalcTier': anchor_tier,
+            }
 
         original_diff = original_diffs.get(entry['song_path'], {}).get(entry['instrument'])
 

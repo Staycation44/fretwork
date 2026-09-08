@@ -151,3 +151,34 @@ TYPE_LABELS = {
     'bass':   'Bass',
     'keys':   'Keys',
 }
+
+
+# --------------------------------------------------------------------------
+# Terminal reporting - shared by BUILD's cache summary and ANALYZE's row count
+# --------------------------------------------------------------------------
+# counts:     {instrument_key: {level_key: int}}
+# levels:     which levels to show as columns
+#             ANALYZE passes its XLSX_LEVELS selection here
+# skip_empty: drop instrument rows with no counts in the shown levels
+#             BUILD shows all, ANALYZE skips based on filters
+def level_matrix(counts, levels=None, skip_empty=False):
+    levels = list(levels) if levels is not None else list(LEVEL_KEYS)
+    if not levels:
+        return ''
+
+    name_width = max(len(DISPLAY_NAMES[key]) for key in INSTRUMENT_KEYS)
+    labels = [LEVEL_DISPLAY_NAMES[level] for level in levels]
+    col_width = max(max(len(label) for label in labels), 5) + 2
+
+    lines = [" " * (name_width + 4) + "".join(label.rjust(col_width) for label in labels)]
+
+    for instrument_key in INSTRUMENT_KEYS:
+        row = counts[instrument_key]
+        if skip_empty and not any(row[level] for level in levels):
+            continue
+        lines.append(
+            f"    {DISPLAY_NAMES[instrument_key]:<{name_width}}"
+            + "".join(str(row[level]).rjust(col_width) for level in levels)
+        )
+
+    return "\n".join(lines)

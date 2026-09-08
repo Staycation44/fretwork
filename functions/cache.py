@@ -22,7 +22,6 @@ Shape:
                                 'time_ms': ndarray,   # sorted
                                 'lanes':   ndarray uint8,  # bitmask, bit N = lane N
                             },
-                            'spans': {'star_power': [(ms, ms)...], 'solo': [...]},
                         },
                         ...  # only levels actually charted for this instrument
                     },
@@ -31,7 +30,6 @@ Shape:
             },
             ...
         },
-        'dropped':  {counter_name: int, ...},
     }
 
 Every level charted for an instrument is cached (whatever combination of E/M/H/X)
@@ -50,16 +48,12 @@ appending suffixes can't introduce a new collision between two different songs
 
 import hashlib
 import pickle
-from datetime import datetime
 
 from functions import instruments
 
 # Hash-derived retrieval codes digit length (pre level/instrument suffix)
 CODE_LEN = 8
 SUFFIX_LEN = 2  # level letter + instrument letter
-
-def gen_ts():
-    return datetime.now().strftime("%m%d%Y-%H%M")
 
 # Retrieval codes
 def _hash_code(song_path, digits):

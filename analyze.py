@@ -99,7 +99,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     selected_levels = _resolve_levels(xlsx_levels)
 
     if diff_mode == "Restore":
-        result = ini_updater.sync_difficulty("Restore", header, config.CACHE_DIR)
+        result = ini_updater.sync_difficulty("Restore", header)
         return result
 
     if cache is None:
@@ -166,7 +166,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             if not diffs:
                 continue
             ini_updater.sync_difficulty(
-                diff_mode, header, config.CACHE_DIR, instrument=instrument_key,
+                diff_mode, header, instrument=instrument_key,
                 songs=diffs.keys(), difficulties=diffs,
             )
 
@@ -202,7 +202,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
                 df = df[column_order]
                 float_cols = [c for c in df.columns if c in xlsx_format.FLOAT_COLS or c == 'D']
-                df[float_cols] = df[float_cols].astype('float32').round(2)
+                df[float_cols] = df[float_cols].round(2)
                 df = df.sort_values('D', ascending=False)
 
                 sheet = sheet_name[:31]  # Excel sheet-name limit
@@ -220,19 +220,8 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     # analyze complete terminal output
     print(f"\n{header} analysis complete")
     print(f"{total} Rows written:")
-    name_width = max(len(instruments.DISPLAY_NAMES[key]) for key in instruments.INSTRUMENT_KEYS)
     active_levels = [level for level in instruments.LEVEL_KEYS if level in selected_levels]
-    level_labels = [instruments.LEVEL_DISPLAY_NAMES[level] for level in active_levels]
-    col_width = max(max(len(label) for label in level_labels), 5) + 2
-    print(" " * (name_width + 4) + "".join(label.rjust(col_width) for label in level_labels))
-    for instrument_key in instruments.INSTRUMENT_KEYS:
-        counts = row_counts[instrument_key]
-        if not any(counts[level] for level in active_levels):
-            continue
-        name = instruments.DISPLAY_NAMES[instrument_key]
-        print(f"    {name:<{name_width}}" + "".join(
-            str(counts[level]).rjust(col_width) for level in active_levels
-        ))
+    print(instruments.level_matrix(row_counts, active_levels, skip_empty=True))
 
     print(f"\nSpreadsheet written: {pathlib.Path(xlsx_out).resolve()}")
     print()

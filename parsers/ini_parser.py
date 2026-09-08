@@ -1,8 +1,7 @@
 """
 INI_PARSER - Parses song.ini files for metadata (name/artist/charter/difficulty/release)
-also captures star-power pitch disambiguation for .mid: (multiplier_note / star_power_note).
 
-Difficulty is captured per-instrument (see instruments.DIFF_TAGS) 
+Difficulty is captured per-instrument (see instruments.DIFF_TAGS)
 
 Source tables (gh/rb/ch) and html-tag cleanup regex live here
 """
@@ -61,15 +60,6 @@ DETAG = re.compile(r"<.*?>")
 # Parsing
 # --------
 
-def _parse_int_tag(raw):
-    if raw is None:
-        return None
-    try:
-        return int(str(raw).strip())
-    except ValueError:
-        return None
-
-
 # no declared encoding - usually utf-8, cp1252 from older tools, utf-16 if saved from notepad
 def _read_text(file):
     raw = file.read_bytes()
@@ -123,10 +113,6 @@ def ini_parse(file):
             official = is_official
             break
 
-    # multiplier_note / star_power_note: valid values are 103 or 116 only.
-    # mid_parser to decide whether 103 means star power or solo, then dropped by build.py
-    mult_note = _parse_int_tag(ini.get('multiplier_note', ini.get('star_power_note', None)))
-
     # Song folder identity - full resolved path to account for duplicate songs across different sources
     song_path = str(file.parent.resolve())
 
@@ -138,7 +124,6 @@ def ini_parse(file):
         'Difficulty': difficulties,
         'Release': release,
         'Official': official,
-        'MultiplierNote': mult_note,
     }
 
 # -----------
