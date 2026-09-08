@@ -4,8 +4,7 @@ XLSX_FORMAT - Styling pass applied to output after ANALYZE
 Formatting:
     - Frozen header row / leading columns (Code / Song Title / Artist)
     - autofilter & auto-fit column widths
-    - Green<yellow<red color scale on difficulties (Official diff, D, RemapDiff, CalcTier)
-    - '-1' or missing difficulty placeholder gets a separate white background so it doesn't skew the scale
+    - Green<yellow<red color scale on D/RemapDiff/CalcTier
     - Level (Easy/Medium/Hard/Expert) gets a fixed categorical fill
     - Raw NPS/VPS breakdown and the N/V/COV formula components are hidden, not deleted
 """
@@ -28,18 +27,16 @@ SCALE_RED = "FFC7CE"
 # columns needing '0.00' formatting
 FLOAT_COLS = {'aNPS', 'pNPS', 'stdNPS', 'medNPS', 'aVPS', 'pVPS', 'stdVPS', 'medVPS', 'N', 'V', 'COV', 'D'}
 
-# difficulty columns - get a color scale + a bordered box
-SCALED_COLS = ['Difficulty', 'D', 'RemapDiff', 'CalcTier']
+# calculated difficulty columns get a color scale
+SCALED_COLS = ['D', 'RemapDiff', 'CalcTier']
 
 # raw NPS/VPS + formula pieces, hidden by default but not deleted
 DEFAULT_HIDDEN_COLS = ['pNPS', 'aNPS', 'medNPS', 'stdNPS',
                         'pVPS', 'aVPS', 'medVPS', 'stdVPS',
                         'N', 'V', 'COV']
 
-# Difficulty's '-1' is analyze.py's placeholder for "no diff_* tag in song.ini"
 # RemapDiff/CalcTier being NaN means "no Expert chart to anchor against for this instrument" (EMHX)
 BLANK_PREDICATES = {
-    'Difficulty': lambda v: v == -1,
     'RemapDiff': pd.isna,
     'CalcTier': pd.isna,
 }
@@ -80,7 +77,7 @@ def _diff_scale(ws, col_letter, rows):
     ws.conditional_formatting.add(
         addr,
         ColorScaleRule(start_type='min', start_color=SCALE_GREEN,
-                        mid_type='percentile', mid_value=50, mid_color=SCALE_YELLOW,
+                        mid_type='percent', mid_value=50, mid_color=SCALE_YELLOW,
                         end_type='max', end_color=SCALE_RED)
     )
 

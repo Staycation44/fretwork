@@ -15,9 +15,8 @@ With no --cache given, RENDER loads the most recently built cache for config.HEA
 Curves are recomputed here rather than read from the cache - doesn't take much processing time
 
 EMHX
-    Each code renders exactly one EMHX level's curves (D/NPS/VPS over time) 
-    RemapDiff/CalcTier in the header are still anchored to the Expert level's
-    Render recalcs expert metrics and uses them to anchor the difficulty remap/tier for every level
+- Each code renders exactly one EMHX level's curves (D/NPS/VPS over time)
+- Render recalcs expert metrics and uses them to anchor the difficulty remap/tier for every level
 """
 
 import argparse

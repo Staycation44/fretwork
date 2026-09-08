@@ -202,7 +202,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
                 df = df[column_order]
                 float_cols = [c for c in df.columns if c in xlsx_format.FLOAT_COLS or c == 'D']
-                df[float_cols] = df[float_cols].astype('float32').round(2)
+                df[float_cols] = df[float_cols].round(2)
                 df = df.sort_values('D', ascending=False)
 
                 sheet = sheet_name[:31]  # Excel sheet-name limit
