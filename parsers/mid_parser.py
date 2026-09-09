@@ -52,6 +52,8 @@ Kick lane 1x base, kick lane 2x = base - 1 (expert only)
 
 """
 
+import concurrent.futures as cf
+import os
 import pathlib
 
 import mido
@@ -182,6 +184,11 @@ def _extract_track(track, instrument_key, to_ms_array):
     return levels_out or None
 
 
+
+#---------------
+# DRUM STUFF
+#---------------
+
 # DRUM NOTES
 # One {tick: mask} dict -> a {'time_ms', 'lanes'} stream, empty arrays if the dict is empty
 def _drum_stream(masks_by_tick, to_ms_array):
@@ -294,24 +301,44 @@ def mid_notes(mid_source):
 
 
 # -----------
-# Search loop
+# Search loop - parallel (should've done this so long ago!)
 # -----------
 
+# worker for mid_loop's process pool
+def _mid_notes_worker(file):
+    try:
+        return mid_notes(file), None
+    except Exception as exc:
+        message = str(exc) or repr(exc)
+        return None, (str(file), type(exc).__name__, message)
+
+
+# max_workers=None -> leave one core free (uncapped maxes out CPU lol)
+def _resolve_workers(max_workers):
+    if max_workers is not None:
+        return max(1, int(max_workers))
+    return max(1, (os.cpu_count() or 1) - 1)
+
+
 # loops through search path, retrieving errors to provide along with cache
-def mid_loop(search_path, errors=None):
+def mid_loop(search_path, errors=None, max_workers=None):
     mid_out = {}
 
     search = pathlib.Path(search_path)
     files = list(search.rglob("notes.mid"))
 
-    for file in tqdm.tqdm(files, desc="Parsing midis", unit="file"):
-        try:
-            stream = mid_notes(file)
-            mid_out[stream['song_path']] = stream
-        except Exception as exc:
-            if errors is not None:
-                message = str(exc) or repr(exc)
-                errors.append((str(file), type(exc).__name__, message))
-            continue
+    if not files:
+        return mid_out
+
+    workers = _resolve_workers(max_workers)
+    chunksize = max(1, len(files) // (workers * 4))
+
+    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(_mid_notes_worker, files, chunksize=chunksize)
+        for stream, error in tqdm.tqdm(results, total=len(files), desc="Parsing midis", unit="file"):
+            if stream is not None:
+                mid_out[stream['song_path']] = stream
+            elif errors is not None:
+                errors.append(error)
 
     return mid_out

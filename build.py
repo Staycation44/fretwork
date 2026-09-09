@@ -31,8 +31,8 @@ META_KEYS = ('Name', 'Artist', 'Charter', 'Release', 'Official')
 # each split into whichever EMHX levels that instrument has charted
 # chart wins on overlap at the whole-song level (a song is assumed to be authored in one format)
 def build_note_index(search_path, errors):
-    mid_streams = mid_parser.mid_loop(search_path, errors)
-    chart_streams = chart_parser.chart_loop(search_path, errors)
+    mid_streams = mid_parser.mid_loop(search_path, errors, max_workers=config.PARSE_MAX_WORKERS)
+    chart_streams = chart_parser.chart_loop(search_path, errors, max_workers=config.PARSE_MAX_WORKERS)
 
     note_index = {}
     note_index.update(mid_streams)

@@ -46,6 +46,8 @@ NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are disc
 DROPPED: star power ('S 2') and solo ('E solo') events are skipped
 """
 
+import concurrent.futures as cf
+import os
 import pathlib
 
 import numpy as np
@@ -156,6 +158,10 @@ def _extract_section(section, instrument_key, to_ms_array):
     }
 
 
+#---------------
+# DRUM STUFF
+#---------------
+
 # Drum prep
 def _drum_stream(masks_by_tick, to_ms_array):
     if not masks_by_tick:
@@ -258,23 +264,43 @@ def chart_notes(chart_source):
 
 
 # -----------
-# Search loop
+# Search loop - also parallel just for fun since it's the same
 # -----------
 
-# loops through path and reports errors for unparesable files
-def chart_loop(search_path, errors=None):
+# worker for chart_loop's process pool
+def _chart_notes_worker(file):
+    try:
+        return chart_notes(file), None
+    except Exception as exc:
+        return None, (str(file), type(exc).__name__, str(exc) or repr(exc))
+
+
+# max_workers=None -> leave one core free (uncapped maxes out CPU lol)
+def _resolve_workers(max_workers):
+    if max_workers is not None:
+        return max(1, int(max_workers))
+    return max(1, (os.cpu_count() or 1) - 1)
+
+
+# loops through path and reports errors for unparseable files
+def chart_loop(search_path, errors=None, max_workers=None):
     chart_out = {}
 
     search = pathlib.Path(search_path)
     files = list(search.rglob("notes.chart"))
 
-    for file in tqdm.tqdm(files, desc="Parsing charts", unit="file"):
-        try:
-            stream = chart_notes(file)
-            chart_out[stream['song_path']] = stream
-        except Exception as exc:
-            if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc) or repr(exc)))
-            continue
+    if not files:
+        return chart_out
+
+    workers = _resolve_workers(max_workers)
+    chunksize = max(1, len(files) // (workers * 4))
+
+    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(_chart_notes_worker, files, chunksize=chunksize)
+        for stream, error in tqdm.tqdm(results, total=len(files), desc="Parsing charts", unit="file"):
+            if stream is not None:
+                chart_out[stream['song_path']] = stream
+            elif errors is not None:
+                errors.append(error)
 
     return chart_out
