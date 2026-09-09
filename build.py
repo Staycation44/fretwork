@@ -73,7 +73,18 @@ def build_cache(search_path=None, header=None, out_dir=None):
         for instrument_key, levels in stream['instruments'].items():
             song_levels = {}
             for level_key, level_stream in levels.items():
-                if len(level_stream['notes']['time_ms']) == 0:
+                notes = level_stream['notes']
+
+                # for drums empty means both hand and kick must have no notes
+                if instrument_key == 'drums':
+                    is_empty = (
+                        len(notes['hand_mask']['time_ms']) == 0
+                        and len(notes['kick_mask']['time_ms']) == 0
+                    )
+                else:
+                    is_empty = len(notes['time_ms']) == 0
+
+                if is_empty:
                     errors.append((
                         song_path, 'EmptyStream',
                         f'{instrument_key} ({level_key}): parsed to zero notes',
