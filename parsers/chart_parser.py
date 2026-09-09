@@ -1,6 +1,5 @@
 """
-CHART_PARSER - Parses notes.chart files into per-instrument, per-level note
-streams (same shape produced by mid_parser):
+CHART_PARSER - Parses notes.chart files into per-instrument, per-level note streams:
     {
         'song_path': str,
         'source_format': 'chart',
@@ -19,23 +18,36 @@ streams (same shape produced by mid_parser):
         },
     }
 
+    Drums' 'notes' shape is different - two independent per-tick streams instead
+    of one 'lanes' bitmask (see DRUM ENCODING below):
+        'notes': {
+            'hand_mask': {'time_ms': np.ndarray, 'lanes': np.ndarray uint8},
+            'kick_mask': {'time_ms': np.ndarray, 'lanes': np.ndarray uint8},
+        }
+
 EMHX: .chart differentiates level purely by section-name prefix
 note numbering (0-4 fret, 7 open) is identical across all four potential sections
 
 parse_chart() already read every section in the file (woohoo inefficiency!), so almost no added cost
 
-Fret ENCODING
+===5 FRET===
+guitar/coop/rhythm/bass/keys encoding
     One uint8 per tick. Bit N set means fret N is played:
     bits 0-4 are GRBYO, bit 7 is open
-    Bits 5-6 are unused (at this time) - in .chart those are the tap and force-flip modifiers
+    bits 5-6 are unused (at this time) - in .chart those are the tap and force-flip modifiers
 
-    A bitmask rather than a frozenset to support small cache size
+===DRUM===
+same section/event logic as 5 fret w/ different note numbers, split hands/kick streams
+    bits 1-5 are hand lanes (hand mask 0-4, supporting both 4 + 5 lane)
+    bit 0 is 1x kick, bit 32 is 2x kick (expert only)
 
 NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
 
 DROPPED: star power ('S 2') and solo ('E solo') events are skipped
 """
 
+import concurrent.futures as cf
+import os
 import pathlib
 
 import numpy as np
@@ -47,9 +59,14 @@ from parsers.timing import tempo_map, ticks_to_ms
 # ------------------------
 # Chart-specific constants
 # ------------------------
+# 5 fret note numbers
 OPEN_NOTE = 7
 NOTE_FRETS = {0, 1, 2, 3, 4, OPEN_NOTE}
 
+# Drum note numbers
+DRUM_KICK_NOTE = 0
+DRUM_2X_KICK_NOTE = 32
+DRUM_HAND_NOTES = {1, 2, 3, 4, 5}
 
 # ---------------------------------------------------------------------
 # Raw section parsing (chart's [Section] / key = value text format)
@@ -141,6 +158,63 @@ def _extract_section(section, instrument_key, to_ms_array):
     }
 
 
+#---------------
+# DRUM STUFF
+#---------------
+
+# Drum prep
+def _drum_stream(masks_by_tick, to_ms_array):
+    if not masks_by_tick:
+        return {
+            'time_ms': np.empty(0, dtype=np.float64),
+            'lanes': np.empty(0, dtype=np.uint8),
+        }
+    ordered_ticks = sorted(masks_by_tick)
+    return {
+        'time_ms': to_ms_array(ordered_ticks),
+        'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
+    }
+
+
+# Drum equivalent of _extract_section, splits hands/kick
+def _extract_drum_section(section, to_ms_array):
+    hand_by_tick = {}
+    kick_by_tick = {}
+
+    for tick_str, events in section.items():
+        events = events if isinstance(events, list) else [events]
+
+        hand_mask = 0
+        kick_mask = 0
+        for event in events:
+            parts = event.split()
+            if len(parts) >= 2 and parts[0] == 'N':
+                n_val = int(parts[1])
+                if n_val in DRUM_HAND_NOTES:
+                    hand_mask |= 1 << (n_val - 1)
+                elif n_val == DRUM_KICK_NOTE:
+                    kick_mask |= 1 << 0
+                elif n_val == DRUM_2X_KICK_NOTE:
+                    kick_mask |= 1 << 1
+
+        if hand_mask or kick_mask:  # skip ticks that only carried modifiers/unrecognized notes
+            tick = int(tick_str)
+            if hand_mask:
+                hand_by_tick[tick] = hand_mask
+            if kick_mask:
+                kick_by_tick[tick] = kick_mask
+
+    if not hand_by_tick and not kick_by_tick:
+        return None
+
+    return {
+        'notes': {
+            'hand_mask': _drum_stream(hand_by_tick, to_ms_array),
+            'kick_mask': _drum_stream(kick_by_tick, to_ms_array),
+        },
+    }
+
+
 def chart_notes(chart_source):
     c_dict = parse_chart(chart_source)
     for required in ('Song', 'SyncTrack'):
@@ -167,7 +241,11 @@ def chart_notes(chart_source):
             if not section:
                 continue  # this instrument/level combo isn't in the file
 
-            stream = _extract_section(section, instrument_key, to_ms_array)
+            stream = (
+                _extract_drum_section(section, to_ms_array)
+                if instrument_key == 'drums'
+                else _extract_section(section, instrument_key, to_ms_array)
+            )
             if stream is not None:
                 levels_out[level_key] = stream
 
@@ -186,23 +264,43 @@ def chart_notes(chart_source):
 
 
 # -----------
-# Search loop
+# Search loop - also parallel just for fun since it's the same
 # -----------
 
-# loops through path and reports errors for unparesable files
-def chart_loop(search_path, errors=None):
+# worker for chart_loop's process pool
+def _chart_notes_worker(file):
+    try:
+        return chart_notes(file), None
+    except Exception as exc:
+        return None, (str(file), type(exc).__name__, str(exc) or repr(exc))
+
+
+# max_workers=None -> leave one core free (uncapped maxes out CPU lol)
+def _resolve_workers(max_workers):
+    if max_workers is not None:
+        return max(1, int(max_workers))
+    return max(1, (os.cpu_count() or 1) - 1)
+
+
+# loops through path and reports errors for unparseable files
+def chart_loop(search_path, errors=None, max_workers=None):
     chart_out = {}
 
     search = pathlib.Path(search_path)
     files = list(search.rglob("notes.chart"))
 
-    for file in tqdm.tqdm(files, desc="Parsing charts", unit="file"):
-        try:
-            stream = chart_notes(file)
-            chart_out[stream['song_path']] = stream
-        except Exception as exc:
-            if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc) or repr(exc)))
-            continue
+    if not files:
+        return chart_out
+
+    workers = _resolve_workers(max_workers)
+    chunksize = max(1, len(files) // (workers * 4))
+
+    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(_chart_notes_worker, files, chunksize=chunksize)
+        for stream, error in tqdm.tqdm(results, total=len(files), desc="Parsing charts", unit="file"):
+            if stream is not None:
+                chart_out[stream['song_path']] = stream
+            elif errors is not None:
+                errors.append(error)
 
     return chart_out

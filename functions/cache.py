@@ -26,6 +26,11 @@ Shape:
                         ...  # only levels actually charted for this instrument
                     },
                     ...  # only instruments actually present for this song
+                    # 'drums' entries have two different streams (hands and kick)
+                    #     'notes': {
+                    #         'hand_mask': {'time_ms': ndarray, 'lanes': ndarray uint8},
+                    #         'kick_mask': {'time_ms': ndarray, 'lanes': ndarray uint8},
+                    #     }
                 },
             },
             ...
@@ -41,9 +46,6 @@ When generated with errors, a CSV is produced alongside the cache with details
 Retrieval codes are per the 8-digit song hash + a level (E/M/H/X) + instrument (G/C/R/B/K)
 '04821993' + Expert + Bass -> '04821993XB'. 
 Render uses the code to define the instrument/level
-
-Since the 8-digit part is already unique per song before any suffix is added,
-appending suffixes can't introduce a new collision between two different songs
 """
 
 import hashlib

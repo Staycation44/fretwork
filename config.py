@@ -21,7 +21,7 @@ AND which backup file Analyze will use to restore song.ini diff_guitar values (o
 # ------
 
 # Library to scan. set here or override on the command line with --search-path.
-SEARCH_PATH = r"C:\Users\user\Documents\Clone Hero\Songs" # edit to your library path before running Build
+SEARCH_PATH = r"C:\Users\[user]\Documents\Clone Hero\Songs" # edit to your library path before running Build
 
 # Identifies the run. Overridable with --header.
 HEADER = "Test" # edit to title your cache before running Build/Analyze/Render
@@ -101,6 +101,13 @@ RENDER_DEFAULT = {
     "fill_curves": True,
     "fill_alpha": 0.12,
 }
+
+#------------------------------
+# parallelization control 
+#------------------------------
+# Caps how many worker processes mid_loop/chart_loop spawn to parse your library in parallel.
+# best to leave this alone, it runs really fast now and you don't need to use this as a CPU benchmark  
+PARSE_MAX_WORKERS = None
 
 #------------------------------
 # Output directories - DON'T NEED TO EDIT, these dump to the tool's folder

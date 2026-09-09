@@ -120,10 +120,11 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
 
     # one item per (song, instrument) - EMHX levels are handled inside the loop
     all_song_instruments = [
-        (song_path, instrument_key, levels)
-        for song_path, song in cache['songs'].items()
-        for instrument_key, levels in song.get('instruments', {}).items()
-    ]
+    (song_path, instrument_key, levels)
+    for song_path, song in cache['songs'].items()
+    for instrument_key, levels in song.get('instruments', {}).items()
+    if instrument_key != 'drums' # SKIP DRUMS UNTIL READY
+]
 
     print(f"\nAnalyzing {header} cache")
     for song_path, instrument_key, levels in tqdm.tqdm(
