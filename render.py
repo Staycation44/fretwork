@@ -25,9 +25,9 @@ import pathlib
 import tqdm
 
 import config
-from functions import cache as cache_mod
+from functions import cache as cache_mod, fret_density, fret_formula
 from functions import curves as curves_mod
-from functions import density, formula, ini_updater, plot, timestamp
+from functions import ini_updater, plot, timestamp
 
 
 def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None):
@@ -61,14 +61,14 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None):
             continue
 
         difficulty = None
-        metrics = density.calc_metrics(entry['notes'])
+        metrics = fret_density.calc_metrics(entry['notes'])
         if metrics is not None:
             expert_notes = entry.get('expert_notes')
-            expert_metrics = density.calc_metrics(expert_notes) if expert_notes is not None else None
-            anchor_remap, anchor_tier = formula.anchor_remap_tier(expert_metrics, entry['instrument'])
+            expert_metrics = fret_density.calc_metrics(expert_notes) if expert_notes is not None else None
+            anchor_remap, anchor_tier = fret_formula.anchor_remap_tier(expert_metrics, entry['instrument'])
 
             difficulty = {
-                **formula.calc_nvcov(metrics),
+                **fret_formula.calc_nvcov(metrics),
                 'RemapDiff': anchor_remap,
                 'CalcTier': anchor_tier,
             }

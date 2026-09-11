@@ -32,6 +32,8 @@ Shape:
                     #         'kick_mask': {'time_ms': ndarray, 'lanes': ndarray uint8},
                     #     }
                 },
+                'roll_spans': {'drums': {level_key: [(start_ms, end_ms, 'single'|'double'), ...], ...}},
+                # roll lanes available per level
             },
             ...
         },

@@ -1,5 +1,5 @@
 """
-CURVES - smoothes density.py's windowed NPS/VPS arrays for visualization
+CURVES - smoothes density.py's windowed arrays for visualization
 
 The raw arrays are converted to rates (notes/sec, lane-changes/sec) before smoothing by an EMA
 """
@@ -8,7 +8,7 @@ import math
 
 import numpy as np
 
-from functions import density
+from functions import fret_density, drum_density
 
 # Shared smoothing time constant for curves
 TAU_MS = 2000.0
@@ -23,7 +23,7 @@ def _ema_forward(samples, decay):
         out.append(acc)
     return np.array(out, dtype=np.float64)
 
-# Single-pole low-pass over the uniform sample array, run forward then backward
+# Single-pole low-pass the array, run forward then backward
 # so peaks don't lag by tau the way a single pass does
 def _ema_curve(samples, step_ms, tau_ms):
     samples = np.asarray(samples, dtype=np.float64)
@@ -60,8 +60,8 @@ def smooth_curves(windows, window_ms, step_ms, tau_ms=TAU_MS):
 
 # final curves for render
 def calc_curves(notes,
-                window_ms=density.WINDOW_MS, step_ms=density.STEP_MS,
-                tau_ms=TAU_MS):
+                window_ms=fret_density.WINDOW_MS, 
+                step_ms=fret_density.STEP_MS, tau_ms=TAU_MS):
 
-    windows = density.window_arrays(notes, window_ms, step_ms)
+    windows = fret_density.window_arrays(notes, window_ms, step_ms)
     return smooth_curves(windows, window_ms, step_ms, tau_ms)

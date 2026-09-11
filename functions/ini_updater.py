@@ -121,15 +121,11 @@ def _existing_backup_paths(backup_csv):
         return {row["song_path"] for row in csv.DictReader(f)}
 
 
-# Brings a backup CSV's header up to BACKUP_COLUMNS once an instrument has
-# joined DIFF_TAGS: the new header, '' in each new column for every existing
-# row, and a row already appended with the longer shape gets its extra fields
-# back by position. Returns True when the file was rewritten, False when there
-# is no file, the header already equals BACKUP_COLUMNS, or the header is longer
-# (BACKUP_COLUMNS is a prefix of it: readers fill the missing names with None,
-# which every reader here treats as blank, so it needs no change). Raises
-# ValueError for any other header: this file exists to undo writes to the
-# user's library, and guessing about it is worse than stopping.
+# Brings a backup CSV's header up to BACKUP_COLUMNS (adding new instruments)
+# Returns True when the file was rewritten
+# False when there is no file/header already equals BACKUP_COLUMNS, or the header is longer
+# readers fill the missing names with None, which every reader here treats as blank
+# Raises ValueError for any other header, guessing is worse than stopping for rewrites
 def migrate_backup_header(backup_csv):
     backup_csv = pathlib.Path(backup_csv)
     if not backup_csv.exists():

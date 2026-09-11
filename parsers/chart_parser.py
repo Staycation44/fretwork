@@ -68,6 +68,10 @@ DRUM_KICK_NOTE = 0
 DRUM_2X_KICK_NOTE = 32
 DRUM_HAND_NOTES = {1, 2, 3, 4, 5}
 
+# Roll lane special phrase types: S <type> <length> 
+# can't overcount these because of the charted notes vs actual implication for difficulty
+DRUM_ROLL_TYPE_TO_KIND = {65: 'single', 66: 'double'}
+
 # ---------------------------------------------------------------------
 # Raw section parsing (chart's [Section] / key = value text format)
 # ---------------------------------------------------------------------
@@ -215,6 +219,30 @@ def _extract_drum_section(section, to_ms_array):
     }
 
 
+# Scans difficulty section for roll-lane spans - called per level
+def _extract_roll_spans(section, to_ms_array):
+    starts, ends, kinds = [], [], []
+    for tick_str, events in section.items():
+        events = events if isinstance(events, list) else [events]
+        for event in events:
+            parts = event.split()
+            # S <type> <length>, only roll-lane types are kept
+            if len(parts) >= 3 and parts[0] == 'S':
+                kind = DRUM_ROLL_TYPE_TO_KIND.get(int(parts[1]))
+                if kind is not None:
+                    start_tick = int(tick_str)
+                    starts.append(start_tick)
+                    ends.append(start_tick + int(parts[2]))
+                    kinds.append(kind)
+
+    if not starts:
+        return []
+
+    start_ms = to_ms_array(starts)
+    end_ms = to_ms_array(ends)
+    return sorted(zip(start_ms.tolist(), end_ms.tolist(), kinds))
+
+
 def chart_notes(chart_source):
     c_dict = parse_chart(chart_source)
     for required in ('Song', 'SyncTrack'):
@@ -228,8 +256,10 @@ def chart_notes(chart_source):
         return ticks_to_ms(ticks, tick_res, *tempo_arrs)
 
     instruments_out = {}
+    roll_spans_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
         levels_out = {}
+        drum_roll_spans = {} if instrument_key == 'drums' else None
 
         for level_key in instruments.LEVEL_KEYS:
             section = None
@@ -248,9 +278,15 @@ def chart_notes(chart_source):
             )
             if stream is not None:
                 levels_out[level_key] = stream
+                if drum_roll_spans is not None:
+                    spans = _extract_roll_spans(section, to_ms_array)
+                    if spans:
+                        drum_roll_spans[level_key] = spans
 
         if levels_out:
             instruments_out[instrument_key] = levels_out
+            if drum_roll_spans:
+                roll_spans_out['drums'] = drum_roll_spans
 
     if not instruments_out:
         raise ValueError(f"No recognized instrument section with usable notes found in {chart_source}")
@@ -260,6 +296,7 @@ def chart_notes(chart_source):
         'source_format': 'chart',
         'resolution': tick_res,
         'instruments': instruments_out,
+        'roll_spans': roll_spans_out,
     }
 
 

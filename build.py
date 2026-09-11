@@ -109,6 +109,8 @@ def build_cache(search_path=None, header=None, out_dir=None):
             'meta': {k: ini_row[k] for k in META_KEYS} | {'Difficulty': ini_row['Difficulty']},
             'source_format': stream['source_format'],
             'instruments': song_instruments,
+            # drum roll lanes
+            'roll_spans': stream.get('roll_spans', {}),
         }
 
     backed_up = ini_updater.backup_data(

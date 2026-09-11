@@ -94,6 +94,11 @@ for _level_key, _base in instruments.MID_PITCH_BASE.items():
 DRUM_PITCH_TO_INFO[instruments.MID_PITCH_BASE['expert'] - 1] = ('expert', '2xkick')
 del _level_key, _base, _lane
 
+# Roll lane special phrase types: S <type> <length> 
+# can't overcount these because of the charted notes vs actual implication for difficulty
+DRUM_ROLL_PITCH_TO_KIND = {126: 'single', 127: 'double'}
+DRUM_ROLL_HARD_VELOCITY_RANGE = range(41, 51)  # 41-50 inclusive
+
 
 # ---------------------------------------------
 # EOF diagnostics - reporting for broken files
@@ -247,6 +252,46 @@ def _extract_drum_track(track, to_ms_array):
     return levels_out or None
 
 
+# Pulls roll-lane spans
+# spans always apply to Expert, apply to Hard at velocity 41-50
+def _extract_roll_spans(track, to_ms_array):
+    open_start = {}  # pitch -> (abs_tick, velocity)
+    entries = []      # (start_tick, end_tick, kind, velocity)
+    abs_tick = 0
+
+    for msg in track:
+        abs_tick += msg.time
+        if msg.type not in ('note_on', 'note_off'):
+            continue
+
+        kind = DRUM_ROLL_PITCH_TO_KIND.get(getattr(msg, 'note', None))
+        if kind is None:
+            continue
+
+        is_on = msg.type == 'note_on' and msg.velocity > 0
+        if is_on:
+            open_start[msg.note] = (abs_tick, msg.velocity)
+        else:
+            opened = open_start.pop(msg.note, None)
+            if opened is not None:
+                start_tick, velocity = opened
+                entries.append((start_tick, abs_tick, kind, velocity))
+
+    if not entries:
+        return {}
+
+    start_ms = to_ms_array([e[0] for e in entries])
+    end_ms = to_ms_array([e[1] for e in entries])
+
+    spans_by_level = {'expert': [], 'hard': []}
+    for (_start_tick, _end_tick, kind, velocity), s_ms, e_ms in zip(entries, start_ms.tolist(), end_ms.tolist()):
+        spans_by_level['expert'].append((s_ms, e_ms, kind))
+        if velocity in DRUM_ROLL_HARD_VELOCITY_RANGE:
+            spans_by_level['hard'].append((s_ms, e_ms, kind))
+
+    return {level: sorted(spans) for level, spans in spans_by_level.items() if spans}
+
+
 def mid_notes(mid_source):
     try:
         mid = mido.MidiFile(str(mid_source), clip=True)
@@ -268,6 +313,7 @@ def mid_notes(mid_source):
     track_map = {t.name.strip(): t for t in mid.tracks if t.name}
 
     instruments_out = {}
+    roll_spans_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
         track = None
         for name in instruments.MID_TRACK_NAMES[instrument_key]:
@@ -285,6 +331,10 @@ def mid_notes(mid_source):
         )
         if levels is not None:
             instruments_out[instrument_key] = levels
+            if instrument_key == 'drums':
+                spans = _extract_roll_spans(track, to_ms_array)
+                if spans:
+                    roll_spans_out['drums'] = spans
 
     if not instruments_out:
         raise ValueError(
@@ -297,6 +347,7 @@ def mid_notes(mid_source):
         'source_format': 'mid',
         'resolution': tick_res,
         'instruments': instruments_out,
+        'roll_spans': roll_spans_out,
     }
 
 

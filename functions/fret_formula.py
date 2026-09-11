@@ -1,17 +1,27 @@
 """
-FORMULA - Per-song difficulty scalar, computed from outputs of functions.density.compute_density_metrics
+5 FRET FORMULA v2 - Per-song difficulty scalar, computed from outputs of functions.density.compute_density_metrics
 
-D = N * V * COV
+Updates over v1:
+refined for window gating some metrics (median and stdev now operate off of active windows only)
+Scaling CoV - better account of spikes over the course of the song / rest sections
+Stamina term to discount shorter songs, and slowly build a boost for longer songs
 
-    epsN = pNPS * 0.05
+D = N * V * COV * STAM
+
+    epsN = aNPS * 0.05
     N = ((medNPS + epsN) * aNPS * pNPS) ** (1 / 3)
-    cvN = stdNPS / (aNPS + medNPS)
+    cvN = stdNPS / (medNPS + aNPS)
 
-    epsV = pVPS * 0.05
+    epsV = aVPS * 0.05
     V = ((medVPS + epsV) * aVPS * pVPS) ** (1 / 3)
-    cvV = stdVPS / (aVPS + medVPS)
+    cvV = stdVPS / (medVPS + aVPS)
 
-    COV = 1 + (cvN * cvV) ** 0.5
+    COV = 1 + c_scale * (cvN * cvV) ** 0.5
+
+    STAM = (DurationS / t_ref) ** s_stam
+
+    # base scalar difficulty
+    D = N * V * COV * STAM
 
 N & V balance peak segment impact against average and median
 COV is the interaction that accounts for uneven difficulty - more variable songs >1, less variable -> 1
@@ -87,27 +97,36 @@ def calc_tier(D, instrument='guitar'):
 def calc_nvcov(metrics):
     pNPS, medNPS, aNPS, stdNPS = metrics['pNPS'], metrics['medNPS'], metrics['aNPS'], metrics['stdNPS']
     pVPS, medVPS, aVPS, stdVPS = metrics['pVPS'], metrics['medVPS'], metrics['aVPS'], metrics['stdVPS']
+    DurationS = metrics['DurationS']
 
     # NPS combo
-    epsN = pNPS * 0.05
+    epsN = aNPS * 0.05
     N = ((medNPS + epsN) * aNPS * pNPS) ** (1 / 3)
-    cvN = (stdNPS / (aNPS + medNPS))
+    cvN = stdNPS / (medNPS + aNPS)
 
     # VPS combo
-    epsV = pVPS * 0.05
+    epsV = aVPS * 0.05
     V = ((medVPS + epsV) * aVPS * pVPS) ** (1 / 3)
-    cvV = (stdVPS / (aVPS + medVPS))
+    cvV = stdVPS / (medVPS + aVPS)
 
     # CoV interaction across NPS & VPS
-    COV = 1 + (cvN * cvV) ** 0.5
+    c_scale = 4 # tuneable scale value (impact of COV)
+    COV = 1 + c_scale * (cvN * cvV) ** 0.5
+
+    # STAMINA!!! sublinear by duration / slowly building boost for long songs, discounts short songs
+    # ~66% @ 30s, ~75% @ 60s, 83% @ 90s, etc / 1x @ t_ref / 1.1x @ ~6 mins, 1.2x @ 9.5 mins, etc
+    t_ref  = 230.0 # 3-4 min average song
+    s_stam = 0.20 # curve exponent
+    STAM = (DurationS / t_ref) ** s_stam
 
     # base scalar difficulty
-    D = N * V * COV
+    D = N * V * COV * STAM
 
     return {
         'N': N,
         'V': V,
         'COV': COV,
+        'STAM': STAM,
         'D': D,
     }
 

@@ -4,15 +4,22 @@ XLSX_FORMAT - Styling pass applied to output after ANALYZE
 Formatting:
     - Frozen header row / leading columns (Code / Song Title / Artist)
     - autofilter & auto-fit column widths
-    - Green<yellow<red color scale on D/RemapDiff/CalcTier
+    - Green<yellow<red color scale on the sheet's difficulty column(s)
     - Level (Easy/Medium/Hard/Expert) gets a fixed categorical fill
-    - Raw NPS/VPS breakdown and the N/V/COV formula components are hidden, not deleted
+    - Raw diagnostic/formula-component columns are hidden, not deleted
+
+Per-sheet-group formatting: 
+fret sheets (Guitar/Bass/Keys) and the Drums sheet have different column sets
+
+TODO - reconcile split details across instruments, xlsx_foramt, & analyze
 """
 
 import pandas as pd
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, NamedStyle
 from openpyxl.formatting.rule import ColorScaleRule
+
+from functions import instruments
 
 BODY_FONT = Font(name="Arial", size=10)
 HEADER_FONT = Font(name="Arial", size=10, bold=True)
@@ -24,22 +31,20 @@ SCALE_GREEN = "C6EFCE"
 SCALE_YELLOW = "FFEB9C"
 SCALE_RED = "FFC7CE"
 
-# columns needing '0.00' formatting
-FLOAT_COLS = {'aNPS', 'pNPS', 'stdNPS', 'medNPS', 'aVPS', 'pVPS', 'stdVPS', 'medVPS', 'N', 'V', 'COV', 'D'}
-
-# calculated difficulty columns get a color scale
-SCALED_COLS = ['D', 'RemapDiff', 'CalcTier']
-
-# raw NPS/VPS + formula pieces, hidden by default but not deleted
-DEFAULT_HIDDEN_COLS = ['pNPS', 'aNPS', 'medNPS', 'stdNPS',
-                        'pVPS', 'aVPS', 'medVPS', 'stdVPS',
-                        'N', 'V', 'COV']
-
-# RemapDiff/CalcTier being NaN means "no Expert chart to anchor against for this instrument" (EMHX)
+# RemapDiff/CalcTier being NaN means no Expert chart to anchor against (EMHX)
+# D_2x being NaN means no 2x-kick reading at this level (drums)
+# Column names are unique across sheet shapes
 BLANK_PREDICATES = {
     'RemapDiff': pd.isna,
     'CalcTier': pd.isna,
+    'D_2x': pd.isna,
 }
+
+
+def float_cols_for(sheet_name):
+    """Float-column set for a sheet - single source of truth so analyze.py's pre-write
+    .round(2) pass and this module's '0.00' number-format both read the same set."""
+    return instruments.SHEET_PROFILES[sheet_name].float_cols
 
 # fixed per-level fill, lighter versions of RB's tier colors - a category, not a gradient
 LEVEL_FILL_COLORS = {
@@ -101,10 +106,13 @@ def _body_style(wb, is_scaled, is_float):
     return _named_style(wb, name, **attrs)
 
 
-def style_sheet(ws, df):
+def style_sheet(ws, df, sheet_name):
     n_rows = df.shape[0]
     columns = list(df.columns)
-    scaled_set = set(SCALED_COLS)
+    profile = instruments.SHEET_PROFILES[sheet_name]
+    float_cols = profile.float_cols
+    scaled_set = set(profile.scaled_cols)
+    hidden_cols = profile.hidden_cols
     wb = ws.parent
 
     blank_style = _named_style(wb, 'FW_Blank', font=BODY_FONT, border=THIN_BORDER, fill=WHITE_FILL)
@@ -125,7 +133,7 @@ def style_sheet(ws, df):
     # style the header + every column's body in one pass, then add the color scale
     for c, col_name in enumerate(columns, start=1):
         is_scaled = col_name in scaled_set
-        is_float = col_name in FLOAT_COLS
+        is_float = col_name in float_cols
         is_blank_checked = col_name in BLANK_PREDICATES
         is_level = col_name == LEVEL_COL
 
@@ -164,5 +172,5 @@ def style_sheet(ws, df):
         lengths = df[col_name].apply(lambda v: 0 if pd.isna(v) else len(str(v)))
         longest = max(lengths.max(), len(col_name))
         ws.column_dimensions[get_column_letter(i)].width = min(max(longest + 2, 6), 40)
-        if col_name in DEFAULT_HIDDEN_COLS:
+        if col_name in hidden_cols:
             ws.column_dimensions[get_column_letter(i)].hidden = True
