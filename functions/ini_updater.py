@@ -11,6 +11,7 @@ The backup CSV lives with the cache files
 """
 
 import csv
+import os
 import pathlib
 
 from functions import instruments, timestamp
@@ -120,6 +121,46 @@ def _existing_backup_paths(backup_csv):
         return {row["song_path"] for row in csv.DictReader(f)}
 
 
+# Brings a backup CSV's header up to BACKUP_COLUMNS once an instrument has
+# joined DIFF_TAGS: the new header, '' in each new column for every existing
+# row, and a row already appended with the longer shape gets its extra fields
+# back by position. Returns True when the file was rewritten, False when there
+# is no file, the header already equals BACKUP_COLUMNS, or the header is longer
+# (BACKUP_COLUMNS is a prefix of it: readers fill the missing names with None,
+# which every reader here treats as blank, so it needs no change). Raises
+# ValueError for any other header: this file exists to undo writes to the
+# user's library, and guessing about it is worse than stopping.
+def migrate_backup_header(backup_csv):
+    backup_csv = pathlib.Path(backup_csv)
+    if not backup_csv.exists():
+        return False
+    with open(backup_csv, "r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if header is None or header == BACKUP_COLUMNS:
+            return False
+        if header == BACKUP_COLUMNS[:len(header)]:
+            added = BACKUP_COLUMNS[len(header):]
+        elif header[:len(BACKUP_COLUMNS)] == BACKUP_COLUMNS:
+            return False   # written by a newer instruments table; readers cope
+        else:
+            raise ValueError(f"unrecognised backup CSV header in {backup_csv}: {header}")
+        rows = list(reader)
+
+    tmp = backup_csv.with_suffix(backup_csv.suffix + ".tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(BACKUP_COLUMNS)
+        for row in rows:
+            # a row appended under the old header with the new shape already
+            # carries its extra fields, in BACKUP_COLUMNS order, past the header
+            extra = row[len(header):len(BACKUP_COLUMNS)]
+            writer.writerow(row[:len(header)] + extra + [''] * (len(added) - len(extra)))
+    os.replace(tmp, backup_csv)
+    print(f"Backup CSV header updated: {backup_csv} (+{', +'.join(added)})")
+    return True
+
+
 # song_path -> {instrument_key: original diff value}, from the backup CSV
 # Used by render.py to show the original difficulty
 def load_backup_diffs(header):
@@ -139,6 +180,7 @@ def load_backup_diffs(header):
 def backup_data(songs, header):
     backup_csv = backup_csv_path(header)
     backup_csv.parent.mkdir(parents=True, exist_ok=True)
+    migrate_backup_header(backup_csv)
     existing_paths = _existing_backup_paths(backup_csv)
     is_new = not backup_csv.exists()
 
@@ -170,6 +212,7 @@ def restore_from_backup(header):
     backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
         raise FileNotFoundError(f"No backup found for header '{header}' at {backup_csv}")
+    migrate_backup_header(backup_csv)
 
     restored = 0
     failed = []
