@@ -48,6 +48,9 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     print(f"\nBuilding {header} cache")
 
+    # a backup CSV with an unrecognised header is refused now, not after the parse
+    ini_updater.migrate_backup_header(ini_updater.backup_csv_path(header))
+
     ini_df = ini_parser.ini_loop(search_path, errors)
     if ini_df.empty:
         raise ValueError(f"No parseable song.ini files found under {search_path}")
