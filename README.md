@@ -155,9 +155,7 @@ Graphs are available in light or dark mode depending on the config.
 
 **Extension Ideas:**
 - Vocals (Unique data, new metric needs, new difficulty logic/calcs) - *design in progress*
-- Drums (similar data, new metric needs, new difficulty logic/calcs) - *design in progress*
 - RB style band diff once all instruments are in
-- Retesting duration and ways to include it (GHVH outliers) - *very annoying, short song downscaling is not bad but calibration for long is tough*
   
 **Bigger rebuilds**
 - Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
