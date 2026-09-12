@@ -11,7 +11,7 @@ Formatting:
 Per-sheet-group formatting: 
 fret sheets (Guitar/Bass/Keys) and the Drums sheet have different column sets
 
-TODO - reconcile split details across instruments, xlsx_foramt, & analyze
+Fully data-driven off instruments.py, a few hardcoded things below (strictly formatting)
 """
 
 import pandas as pd
@@ -32,12 +32,13 @@ SCALE_YELLOW = "FFEB9C"
 SCALE_RED = "FFC7CE"
 
 # RemapDiff/CalcTier being NaN means no Expert chart to anchor against (EMHX)
-# D_2x being NaN means no 2x-kick reading at this level (drums)
+# D_2x/NoteCount_2x being NaN means no 2x-kick reading at this level (drums)
 # Column names are unique across sheet shapes
 BLANK_PREDICATES = {
     'RemapDiff': pd.isna,
     'CalcTier': pd.isna,
     'D_2x': pd.isna,
+    'NoteCount_2x': pd.isna,
 }
 
 

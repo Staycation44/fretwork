@@ -3,6 +3,7 @@
 
 NPS = Notes Per Second
     Notes are counted per game logic - any number of frets on the same timestamp count as 1 note
+
 VPS = Variability per Second
     Variability is maximum fret changes between notes (released or added)
 

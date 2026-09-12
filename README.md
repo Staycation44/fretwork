@@ -99,7 +99,7 @@ The raw NPS/VPS details and N/V/COV formula components are dropped, but they can
 
 In the metrics spreadsheet / render header, you'll see D translated two ways:
 - **RemapDiff (0–6):** A manual grouping, calibrated to roughly match the percentage of official releases across the seven tiers. Roughly, how would this have been tiered in a Rock Band game (capped at 6). Guitar (plus Co-op/Rhythm), Bass, and Keys each have their own bin edges, fit against that instrument's own `diff_*` distribution.
-- **CalcTier:** A continuous, log-scaled tiering calculation. Every 0.44 natural-log increase in D over a baseline value increments the tier by one. This value is not capped, so officials at Dragonforce level end up in 7+, and a lot of notable customs are 10+. Unlike RemapDiff, the baseline/increment constants are currently shared across all instruments rather than fit per-instrument.
+- **CalcTier:** A continuous, log-scaled tiering calculation. Every set natural-log increase in D over a baseline value increments the tier by one. This value is not capped, so tiers can extend well past 6 to provide additional granularity.
 
 **RemapDiff and CalcTier are computed once per song/instrument, from the Expert level's D only**
 

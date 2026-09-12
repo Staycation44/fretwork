@@ -15,18 +15,13 @@ pairs cache and spreadsheet together
 Output is a single .xlsx spreadsheet, one tab per instrument group that has data in the cache
 (EMHX levels share the same tab as a filterable 'Level' column - see xlsx_format.py - not
 separate tabs per level)
+
 Formatted via xlsx_format.py
 
 Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
 
 EMHX / RemapDiff & CalcTier anchor to expert, since only 1 diff value per instrument in song.ini
 D remains calculated per level
-
-Drums have no RemapDiff/CalcTier equivalent yet so the Expert-anchor step +
-the song.ini CalcTier/RemapDiff write-back are both skipped entirely for instrument_key == 'drums'
-
-
-TODO - reconcile split details across instruments, xlsx_foramt, & analyze
 """
 import argparse
 import pathlib
@@ -75,28 +70,17 @@ def _fret_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor
     }
 
 
-# One EMHX level's drum row: D_1x/D_2x live as sibling columns on one row 
-# Returns None if there's no usable hand or 1x-kick data at this level 
+# One EMHX level's drum row: D_1x/D_2x live as sibling columns on one row
+# Returns None if there's no usable hand or 1x-kick data at this level
 def _kick_reading_diag(reading, r, suffix):
-    return {
-        f'pKPS_{suffix}': reading['pKPS'], f'aKPS_{suffix}': reading['aKPS'],
-        f'medKPS_{suffix}': reading['medKPS'], f'stdKPS_{suffix}': reading['stdKPS'],
-        f'pCo_{suffix}': reading.get('pCo'), f'aCo_{suffix}': reading.get('aCo'),
-        f'medCo_{suffix}': reading.get('medCo'), f'stdCo_{suffix}': reading.get('stdCo'),
-        f'IndepFrac_{suffix}': reading.get('IndepFrac'),
-        f'pIKPS_{suffix}': reading.get('pIKPS'), f'aIKPS_{suffix}': reading.get('aIKPS'),
-        f'medIKPS_{suffix}': reading.get('medIKPS'), f'stdIKPS_{suffix}': reading.get('stdIKPS'),
-        f'K_{suffix}': r['K'],
-        f'Co_axis_{suffix}': r['Co_axis'], f'Indep_axis_{suffix}': r['Indep_axis'],
-        f'CoV_overall_{suffix}': r['CoV_overall'],
-        f'Kick_level_{suffix}': r['Kick_level'],
-        f'Interaction_{suffix}': r['Interaction'],
-        f'Base_{suffix}': r['Base'],
-    }
+    source = {**reading, **r}
+    return {f'{base}_{suffix}': source.get(base) for base in instruments.DRUM_KICK_DIAG_BASE}
 
 
-def _drum_row(code, meta, notes, instrument_key, level_key, roll_spans=None):
-    metrics = drum_density.calc_drum_metrics(notes, roll_spans=roll_spans)
+def _drum_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor_tier,
+              roll_spans=None, metrics=None):
+    if metrics is None:
+        metrics = drum_density.calc_drum_metrics(notes, roll_spans=roll_spans)
     hand = metrics['hand']
     reading_1x = metrics['1x']
     if hand is None or reading_1x is None:
@@ -105,32 +89,30 @@ def _drum_row(code, meta, notes, instrument_key, level_key, roll_spans=None):
     reading_2x = metrics['2x']
     r1x = drum_formula.calc_drum_d(metrics, '1x')
 
-    # NoteCount/DurationS for split streams
-    hand_times = hand['time_ms']
-    kick_times = reading_1x['time_ms']
-    note_count = int(hand_times.size + kick_times.size)
-    dur_s = max(float(hand_times[-1]), float(kick_times[-1])) / 1000.0
-
+    # Hand-side diagnostics (pHPS.../STAM)
+    hand_source = {**hand, **r1x}
     row = {
         'Code': code,
         **_row_meta(meta, instrument_key, level_key),
-        'NoteCount': note_count,
-        'DurationS': int(dur_s),
+        # NoteCount is split by reading (1x/2x)
+        'NoteCount_1x': metrics['NoteCount_1x'],
+        'DurationS': int(metrics['DurationS']),
         'D_1x': r1x['D'],
-        'pHPS': hand['pHPS'], 'aHPS': hand['aHPS'], 'medHPS': hand['medHPS'], 'stdHPS': hand['stdHPS'],
-        'pTPS': hand['pTPS'], 'aTPS': hand['aTPS'], 'medTPS': hand['medTPS'], 'stdTPS': hand['stdTPS'],
-        'H': r1x['H'], 'T': r1x['T'], 'Pattern': r1x['Pattern'],
-        'Movement': r1x['Movement'],
-        'Hand_level': r1x['Hand_level'],
+        # Tiers anchored to Expert's D_1x
+        'RemapDiff': anchor_remap,
+        'CalcTier': anchor_tier,
+        **{col: hand_source[col] for col in instruments.DRUM_HAND_DIAG_COLS},
         **_kick_reading_diag(reading_1x, r1x, '1x'),
     }
 
     if reading_2x is not None:
         r2x = drum_formula.calc_drum_d(metrics, '2x')
         row['D_2x'] = r2x['D']
+        row['NoteCount_2x'] = metrics['NoteCount_2x']
         row.update(_kick_reading_diag(reading_2x, r2x, '2x'))
     else:
         row['D_2x'] = None
+        row['NoteCount_2x'] = None
         row.update({k: None for k in instruments.DRUM_KICK_DIAG_COLS_2X})
 
     return row
@@ -207,9 +189,22 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         song = cache['songs'][song_path]
         codes_for_instrument = song.get('codes', {}).get(instrument_key, {})
 
-        # Drums has no Expert-anchored RemapDiff/CalcTier yet
         if instrument_key == 'drums':
             roll_spans_by_level = song.get('roll_spans', {}).get('drums', {})
+
+            expert_entry = levels.get('expert')
+            expert_metrics = None
+            if expert_entry is not None:
+                expert_roll_spans = roll_spans_by_level.get('expert', [])
+                expert_metrics = drum_density.calc_drum_metrics(expert_entry['notes'], roll_spans=expert_roll_spans)
+            anchor_remap, anchor_tier = drum_formula.anchor_remap_tier(expert_metrics)
+
+            if diff_mode in ("CalcTier", "RemapDiff") and anchor_remap is not None:
+                difficulties_by_instrument[instrument_key][song_path] = {
+                    'RemapDiff': anchor_remap,
+                    'CalcTier': anchor_tier,
+                }
+
             for level_key, inst_entry in levels.items():
                 if level_key not in selected_levels:
                     continue
@@ -217,7 +212,9 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                 code = codes_for_instrument.get(level_key)
                 roll_spans = roll_spans_by_level.get(level_key, [])
 
-                row = _drum_row(code, song['meta'], inst_entry['notes'], instrument_key, level_key, roll_spans)
+                row = _drum_row(code, song['meta'], inst_entry['notes'], instrument_key, level_key,
+                                 anchor_remap, anchor_tier, roll_spans=roll_spans,
+                                 metrics=expert_metrics if level_key == 'expert' else None)
                 if row is None:
                     skipped += 1
                     continue
@@ -254,8 +251,6 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             row_counts[instrument_key][level_key] += 1
 
     # song.ini write-back happens after metrics are computed for every song
-    # difficulties_by_instrument['drums'] is empty for now
-    # drum specific branch needed here
     if diff_mode in ("CalcTier", "RemapDiff"):
         for instrument_key in instruments.INSTRUMENT_KEYS:
             diffs = difficulties_by_instrument[instrument_key]

@@ -6,6 +6,8 @@ INSTRUMENTS - Central definition of every supported instrument:
     - which song.ini tag holds its (Expert-referenced) difficulty
     - the single-letter suffixes used in retrieval codes (level + instrument)
     - whether it supports open notes
+    - column details for xlsx generation
+    - terminal output block for inst/level for build/analyze
 
 Track/section names sourced from TheNathannator's GuitarGame_ChartFormats documentation
 
@@ -23,14 +25,9 @@ A given song may chart anywhere from 1 to all 4 levels for a given instrument
 Legacy GH1/2-style open note encoding in .mid assumed Expert-only
 
 DRUMS
-Drums shares a lot with the 5-fret instruments:
-- 'PART DRUMS' mid / [Level]'Drums' chart naming conventions
-- same per-level .mid pitch block bases) -
-Differences:
-- Note-number decoding
 - splitting note streams out to have hands and kick separated
+- 1x & 2x columns/suffix conventions to support both for one song row
 
-TODO - reconcile split details across instruments, xlsx_foramt, & analyze
 """
 
 from collections import namedtuple
@@ -201,18 +198,21 @@ FRET_SCALED_COLS = ['D', 'RemapDiff', 'CalcTier']
 DRUM_HAND_DIAG_COLS = [
     'pHPS', 'aHPS', 'medHPS', 'stdHPS',
     'pTPS', 'aTPS', 'medTPS', 'stdTPS',
-    'H', 'T', 'Pattern', 'Movement', 'Hand_level',
+    'H', 'T',
+    'STAM',
+]
+
+# unsuffixed field names, shared by both kick readings - _drum_kick_diag_cols
+# below suffixes these for the xlsx column list; analyze.py reads the same
+# list, unsuffixed, straight off {**reading, **r}.
+DRUM_KICK_DIAG_BASE = [
+    'pKPS', 'aKPS', 'medKPS', 'stdKPS',
+    'K', 'CoV', 'Base',
 ]
 
 
 def _drum_kick_diag_cols(suffix):
-    return [
-        f'pKPS_{suffix}', f'aKPS_{suffix}', f'medKPS_{suffix}', f'stdKPS_{suffix}',
-        f'pCo_{suffix}', f'aCo_{suffix}', f'medCo_{suffix}', f'stdCo_{suffix}',
-        f'IndepFrac_{suffix}', f'pIKPS_{suffix}', f'aIKPS_{suffix}', f'medIKPS_{suffix}', f'stdIKPS_{suffix}',
-        f'K_{suffix}', f'Co_axis_{suffix}', f'Indep_axis_{suffix}', f'CoV_overall_{suffix}',
-        f'Kick_level_{suffix}', f'Interaction_{suffix}', f'Base_{suffix}',
-    ]
+    return [f'{base}_{suffix}' for base in DRUM_KICK_DIAG_BASE]
 
 
 DRUM_KICK_DIAG_COLS_1X = _drum_kick_diag_cols('1x')
@@ -221,12 +221,12 @@ DRUM_DIAG_COLS = [*DRUM_HAND_DIAG_COLS, *DRUM_KICK_DIAG_COLS_1X, *DRUM_KICK_DIAG
 
 DRUM_COLUMN_ORDER = [
     'Code', 'Song Title', 'Artist', 'Level', 'Type', 'Charter', 'Release', 'Official',
-    'NoteCount', 'DurationS', 'Difficulty', 'D_1x', 'D_2x',
+    'NoteCount_1x', 'NoteCount_2x', 'DurationS', 'Difficulty', 'D_1x', 'D_2x', 'RemapDiff', 'CalcTier',
     *DRUM_DIAG_COLS,
 ]
 DRUM_FLOAT_COLS = {*DRUM_DIAG_COLS, 'D_1x', 'D_2x'}
 DRUM_HIDDEN_COLS = list(DRUM_DIAG_COLS)
-DRUM_SCALED_COLS = ['D_1x', 'D_2x']
+DRUM_SCALED_COLS = ['D_1x', 'D_2x', 'RemapDiff', 'CalcTier']
 
 _FRET_PROFILE = SheetProfile(FRET_COLUMN_ORDER, FRET_HIDDEN_COLS, FRET_FLOAT_COLS, FRET_SCALED_COLS, 'D')
 _DRUM_PROFILE = SheetProfile(DRUM_COLUMN_ORDER, DRUM_HIDDEN_COLS, DRUM_FLOAT_COLS, DRUM_SCALED_COLS, 'D_1x')
