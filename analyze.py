@@ -11,6 +11,7 @@ pairs cache and spreadsheet together
     python analyze.py --cache FullTest_cache_08052026-0330.pkl
     python analyze.py --diff-mode CalcTier
     python analyze.py --diff-mode Restore
+    python analyze.py --diff-mode None        (writes nothing this run, DIFF_WRITE_OVERRIDES included)
 
 Output is a single .xlsx spreadsheet, one tab per instrument group that has data in the cache
 (EMHX levels share the same tab as a filterable 'Level' column - see xlsx_format.py - not
@@ -19,9 +20,17 @@ separate tabs per level)
 Formatted via xlsx_format.py
 
 Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or restore backed-up values (all instruments at once).
+    - modes and DIFF_WRITE_OVERRIDES are validated before anything else runs
+    - overrides apply on top of DIFF_WRITE_MODE, including when it's None (only the overridden instruments write)
+    - Restore always restores every instrument - overrides are ignored (and 'Restore' isn't a valid override)
+    - song.inis are written last, after the spreadsheet is saved, and only where the backup holds the original
+    - unchanged values aren't rewritten
+
+The cache's own header (stored by Build, or read from the cache filename) names the spreadsheet and
+picks the backup CSV - --cache accepts a full path or a bare filename from the caches folder
 
 EMHX / RemapDiff & CalcTier anchor to expert, since only 1 diff value per instrument in song.ini
-D remains calculated per level
+D remains calculated per level - every instrument with an Expert anchor can be written, whatever XLSX_LEVELS shows
 """
 import argparse
 import pathlib
@@ -36,6 +45,7 @@ from functions import cache as cache_mod
 from functions import fret_density, fret_formula
 from functions import drum_density, drum_formula
 from functions import vocal_density, vocal_formula
+from functions import band_formula
 
 
 # shared row-metadata block - identical between the fret and drum row builders
@@ -72,10 +82,15 @@ def _fret_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor
     }
 
 
+# kick-rate diagnostics for a chart with no kick notes (K = 0)
+NO_KICKS = {'pKPS': 0.0, 'aKPS': 0.0, 'medKPS': 0.0, 'stdKPS': 0.0}
+
+
 # One EMHX level's drum row: D_1x/D_2x live as sibling columns on one row
-# Returns None if there's no usable hand or 1x-kick data at this level
+# Returns None if there's no usable hand data at this level - a chart with no kicks
+# (e.g. RB-style Easy drums) still gets a row, scored with K = 0
 def _kick_reading_diag(reading, r, suffix):
-    source = {**reading, **r}
+    source = {**(reading or NO_KICKS), **r}
     return {f'{base}_{suffix}': source.get(base) for base in instruments.DRUM_KICK_DIAG_BASE}
 
 
@@ -85,7 +100,7 @@ def _drum_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor
         metrics = drum_density.calc_drum_metrics(notes, roll_spans=roll_spans)
     hand = metrics['hand']
     reading_1x = metrics['1x']
-    if hand is None or reading_1x is None:
+    if hand is None:
         return None
 
     reading_2x = metrics['2x']
@@ -146,6 +161,30 @@ def _vocal_row(code, meta, vocal_entry, metrics=None, d=None):
     }
 
 
+# One Band row per song. d_by_instrument: {instrument_key: D or None}, from song_anchor
+# no row for single insturment songs / non-core band combos
+def _band_row(meta, charted_instruments, d_by_instrument):
+    band_result = band_formula.calc_band_d(d_by_instrument)
+    if band_result['RemapBandDiff'] is None:
+        return None
+
+    difficulty_meta = meta.get('Difficulty') or {}
+    instrument_letters = '/'.join(
+        instruments.CODE_SUFFIX[key]
+        for key in band_formula.BAND_ROLE_ORDER
+        if key in charted_instruments
+    )
+
+    return {
+        'Song Title': meta.get('Name'),
+        'Artist': meta.get('Artist'),
+        'Release': meta.get('Release'),
+        'Difficulty': difficulty_meta.get('band', '-1'),
+        'Instruments': instrument_letters,
+        **band_result,
+    }
+
+
 # Save clock, since that's slower than most of the analysis...
 def _save_workbook(writer):
     start = time.time()
@@ -168,6 +207,69 @@ def _resolve_levels(spec):
     return selected
 
 
+# ---------------------------
+# song.ini write-back planning
+# ---------------------------
+WRITE_MODES = ("CalcTier", "RemapDiff")
+WRITE_TARGETS = [*instruments.INSTRUMENT_KEYS, 'band']
+
+
+# 'calctier' / 'CALCTIER' / 'None' etc -> canonical mode (or None), anything else is an error
+def _normalize_mode(value, where):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        wanted = value.strip().lower()
+        if wanted == 'none':
+            return None
+        for mode in ini_updater.VALID_MODES:
+            if wanted == mode.lower():
+                return mode
+    raise ValueError(f"Unknown diff mode {value!r} in {where} - expected None, "
+                     f"{', '.join(repr(m) for m in ini_updater.VALID_MODES)}")
+
+
+# DIFF_WRITE_MODE + DIFF_WRITE_OVERRIDES -> (global mode, {instrument_key: write mode})
+# Raises before any work starts:
+#   unknown mode / instrument key, or 'Restore' as a per-instrument override
+# Restore ignores overrides (every instrument is restored), otherwise each instrument uses its
+# override if it has one - so overrides still write when the global mode is None
+def _resolve_diff_plan(diff_mode, diff_overrides):
+    mode = _normalize_mode(diff_mode, "DIFF_WRITE_MODE / --diff-mode")
+
+    overrides = {}
+    for key, value in (diff_overrides or {}).items():
+        instrument_key = str(key).strip().lower()
+        if instrument_key not in WRITE_TARGETS:
+            raise ValueError(f"Unknown instrument {key!r} in DIFF_WRITE_OVERRIDES - "
+                             f"expected one of {', '.join(WRITE_TARGETS)}")
+        override = _normalize_mode(value, f"DIFF_WRITE_OVERRIDES[{key!r}]")
+        if override == "Restore":
+            raise ValueError(f"DIFF_WRITE_OVERRIDES[{key!r}] = 'Restore' isn't supported - Restore always covers "
+                             f"every instrument, use DIFF_WRITE_MODE = 'Restore' or --diff-mode Restore")
+        overrides[instrument_key] = override
+
+    if mode == "Restore":
+        if overrides:
+            print("Note: DIFF_WRITE_OVERRIDES are ignored during Restore - every instrument is restored")
+        return mode, {}
+
+    plan = {key: overrides.get(key, mode) for key in WRITE_TARGETS}
+    return mode, {key: m for key, m in plan.items() if m is not None}
+
+
+# an existing spreadsheet that's open in Excel can't be replaced - found out now, not after the analysis
+def _check_writable(path):
+    path = pathlib.Path(path)
+    if not path.exists():
+        return
+    try:
+        with open(path, 'ab'):
+            pass
+    except PermissionError:
+        raise PermissionError(f"Can't write {path} - close it in Excel (or whatever has it open) and rerun") from None
+
+
 # column order for a given sheet, with EXTRA_METRICS-gated hidden columns dropped
 def _column_order_for(sheet_name):
     profile = instruments.SHEET_PROFILES[sheet_name]
@@ -179,20 +281,43 @@ def _column_order_for(sheet_name):
 # run the analysis - loading from selected/default cache
 def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=None,
             diff_overrides=None, xlsx_levels=None):
-    header = header or config.HEADER
+    explicit_header = header
+    header = timestamp.validate_header(header or config.HEADER)
     diff_mode = diff_mode if diff_mode is not None else config.DIFF_WRITE_MODE
     diff_overrides = diff_overrides if diff_overrides is not None else config.DIFF_WRITE_OVERRIDES
     xlsx_levels = xlsx_levels if xlsx_levels is not None else config.XLSX_LEVELS
     selected_levels = _resolve_levels(xlsx_levels)
 
-    if diff_mode == "Restore":
+    # every mode/override is checked before any work starts
+    global_mode, write_plan = _resolve_diff_plan(diff_mode, diff_overrides)
+
+    if global_mode == "Restore":
+        print(f"\nRestore mode - restoring {header} song.ini difficulties from backup (no spreadsheet this run)")
         result = ini_updater.sync_difficulty("Restore", header)
         return result
 
     if cache is None:
-        if cache_path is None:
+        if cache_path is not None:
+            cache_path = timestamp.resolve_cache_path(cache_path)
+        else:
             cache_path = timestamp.latest_output('cache', header, out_dir, ext='pkl')
         cache = cache_mod.load(cache_path)
+
+    # the cache's own header names the spreadsheet and picks the backup CSV
+    header = cache_mod.resolve_header(cache, cache_path, explicit_header, fallback=header)
+    _cache_header, ts = timestamp.split_cache_name(cache_path) if cache_path else (None, None)
+    xlsx_out = timestamp.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
+    _check_writable(xlsx_out)
+
+    # writes only go where the backup already holds the original
+    backup_rows = None
+    if write_plan:
+        if not ini_updater.backup_csv_path(header).exists():
+            raise FileNotFoundError(
+                f"No backup found for header '{header}' at {ini_updater.backup_csv_path(header)} - "
+                f"run build.py before writing difficulties"
+            )
+        backup_rows = ini_updater.load_backup_rows(header)
 
     gen_on = cache.get('generated_at', 'unknown')
 
@@ -202,8 +327,13 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         for key in instruments.INSTRUMENT_KEYS
     }
     difficulties_by_instrument = {key: {} for key in instruments.INSTRUMENT_KEYS}
+    rows_by_instrument['band'] = []
+    difficulties_by_instrument['band'] = {}
     total = 0
     skipped = 0
+
+    # {song_path: {instrument_key: D}}
+    song_anchor = {}
 
     # one item per (song, instrument) - EMHX levels are handled inside the loop
     all_song_instruments = [
@@ -227,13 +357,15 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             if expert_entry is not None:
                 expert_roll_spans = roll_spans_by_level.get('expert', [])
                 expert_metrics = drum_density.calc_drum_metrics(expert_entry['notes'], roll_spans=expert_roll_spans)
-            anchor_remap, anchor_tier = drum_formula.anchor_remap_tier(expert_metrics)
+            anchor_remap, anchor_tier, anchor_D = drum_formula.anchor_remap_tier(expert_metrics)
 
-            if diff_mode in ("CalcTier", "RemapDiff") and anchor_remap is not None:
+            if anchor_remap is not None:
                 difficulties_by_instrument[instrument_key][song_path] = {
                     'RemapDiff': anchor_remap,
                     'CalcTier': anchor_tier,
                 }
+            if anchor_D is not None:
+                song_anchor.setdefault(song_path, {})[instrument_key] = anchor_D
 
             for level_key, inst_entry in levels.items():
                 if level_key not in selected_levels:
@@ -264,11 +396,13 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                 if vocal_metrics is not None:
                     vocal_d = vocal_formula.calc_vocal_d(vocal_metrics)
 
-            if diff_mode in ("CalcTier", "RemapDiff") and vocal_d is not None:
+            if vocal_d is not None:
                 difficulties_by_instrument[instrument_key][song_path] = {
                     'RemapDiff': vocal_d['RemapDiff'],
                     'CalcTier': vocal_d['CalcTier'],
                 }
+            if vocal_d is not None:
+                song_anchor.setdefault(song_path, {})[instrument_key] = vocal_d['D']
 
             for level_key, inst_entry in levels.items():
                 if level_key not in selected_levels:
@@ -291,13 +425,15 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         # Expert's metrics are computed once here, they anchor RemapDiff/CalcTier
         expert_entry = levels.get('expert')
         expert_metrics = fret_density.calc_metrics(expert_entry['notes']) if expert_entry is not None else None
-        anchor_remap, anchor_tier = fret_formula.anchor_remap_tier(expert_metrics, instrument_key)
+        anchor_remap, anchor_tier, anchor_D = fret_formula.anchor_remap_tier(expert_metrics, instrument_key)
 
-        if diff_mode in ("CalcTier", "RemapDiff") and anchor_remap is not None:
+        if anchor_remap is not None:
             difficulties_by_instrument[instrument_key][song_path] = {
                 'RemapDiff': anchor_remap,
                 'CalcTier': anchor_tier,
             }
+        if anchor_D is not None:
+            song_anchor.setdefault(song_path, {})[instrument_key] = anchor_D
 
         for level_key, inst_entry in levels.items():
             if level_key not in selected_levels:
@@ -315,24 +451,20 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             rows_by_instrument[instrument_key].append(row)
             row_counts[instrument_key][level_key] += 1
 
-    # song.ini write-back happens after metrics are computed for every song
-    # per-instrument mode resolves against diff_overrides first, falling back to diff_mode;
-    # an override of None always skips that instrument, even when diff_mode would write it
-    if diff_mode in ("CalcTier", "RemapDiff"):
-        for instrument_key in instruments.INSTRUMENT_KEYS:
-            instrument_mode = diff_overrides.get(instrument_key, diff_mode)
-            if instrument_mode is None:
-                continue
-            diffs = difficulties_by_instrument[instrument_key]
-            if not diffs:
-                continue
-            ini_updater.sync_difficulty(
-                instrument_mode, header, instrument=instrument_key,
-                songs=diffs.keys(), difficulties=diffs,
-            )
+    # Band: one row per song, built from every instrument's anchor
+    for song_path, song in cache['songs'].items():
+        charted_instruments = song.get('instruments', {})
+        anchor = song_anchor.get(song_path, {})
+        row = _band_row(song['meta'], charted_instruments, anchor)
+        if row is None:
+            continue
+        rows_by_instrument['band'].append(row)
 
-    ts = timestamp.ext_ts(cache_path, 'cache', header) if cache_path else None
-    xlsx_out = timestamp.output_path('metrics', header, ts=ts, out_dir=out_dir, ext='xlsx')
+        # band only exists (and is only written) where it has a real RemapBandDiff/CalcBandTier
+        difficulties_by_instrument['band'][song_path] = {
+            'RemapDiff': row['RemapBandDiff'],
+            'CalcTier': row['CalcBandTier'],
+        }
 
     # rows are grouped per sheet up front so the write bar knows its total before it starts
     sheet_rows = {
@@ -343,6 +475,40 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     total_rows = sum(len(rows) for rows in sheet_rows.values())
 
     frames = {}
+    if not sheet_rows:
+        print(f"\nNo spreadsheet written - this cache has no rows for XLSX_LEVELS '{xlsx_levels}' "
+              f"(check XLSX_LEVELS in config.py or --xlsx-levels)")
+    else:
+        _write_workbook(xlsx_out, sheet_rows, total_rows, frames)
+
+    # analyze complete terminal output
+    print(f"\n{header} analysis complete")
+    print(f"{total} Rows written:")
+    active_levels = [level for level in instruments.LEVEL_KEYS if level in selected_levels]
+    print(instruments.level_matrix(row_counts, active_levels, skip_empty=True))
+
+    if frames:
+        print(f"\nSpreadsheet written: {pathlib.Path(xlsx_out).resolve()}")
+
+    # song.ini write-back happens last, once the spreadsheet is safely saved
+    # each instrument uses its resolved mode (override first, then DIFF_WRITE_MODE)
+    if write_plan:
+        print()
+        for instrument_key, instrument_mode in write_plan.items():
+            diffs = difficulties_by_instrument[instrument_key]
+            if not diffs:
+                continue
+            ini_updater.sync_difficulty(
+                instrument_mode, header, instrument=instrument_key,
+                songs=diffs.keys(), difficulties=diffs, backup_rows=backup_rows,
+            )
+    print()
+
+    return frames
+
+
+# one tab per sheet group, styled - frames collects each written DataFrame by sheet name
+def _write_workbook(xlsx_out, sheet_rows, total_rows, frames):
     writer = pd.ExcelWriter(xlsx_out, engine='openpyxl')
     try:
         # counted in rows
@@ -379,35 +545,32 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     # workbook save clock call
     _save_workbook(writer)
 
-    # analyze complete terminal output
-    print(f"\n{header} analysis complete")
-    print(f"{total} Rows written:")
-    active_levels = [level for level in instruments.LEVEL_KEYS if level in selected_levels]
-    print(instruments.level_matrix(row_counts, active_levels, skip_empty=True))
-
-    print(f"\nSpreadsheet written: {pathlib.Path(xlsx_out).resolve()}")
-    print()
-
-    return frames
-
 
 def main():
     parser = argparse.ArgumentParser(description="Compute metrics from a note stream cache.")
     parser.add_argument('--header', default=None, help="run identifier to look up (default: config.HEADER)")
     parser.add_argument('--cache', default=None, help="explicit cache path (overrides header lookup)")
-    parser.add_argument('--diff-mode', default=None, choices=list(ini_updater.VALID_MODES),
-                         help="Write CalcTier/RemapDiff into each instrument's own diff_* tag "
+    parser.add_argument('--diff-mode', default=None,
+                         help="CalcTier | RemapDiff | Restore | None. "
+                              "Write CalcTier/RemapDiff into each instrument's own diff_* tag "
                               "(anchored to the Expert-level D - see module docstring), or "
                               "Restore every instrument's originals from backup (skips metrics/"
-                              "spreadsheet generation entirely). Default: config.DIFF_WRITE_MODE. "
+                              "spreadsheet generation entirely), or None to write nothing this run "
+                              "(DIFF_WRITE_OVERRIDES included). Default: config.DIFF_WRITE_MODE. "
                               "Per-instrument exceptions are config-only, see DIFF_WRITE_OVERRIDES.")
     parser.add_argument('--xlsx-levels', default=None,
                          help="Which EMHX levels to emit, e.g. X, EX, EMHX, or ALL. "
                               "Default: config.XLSX_LEVELS.")
     args = parser.parse_args()
 
-    analyze(cache_path=args.cache, header=args.header, diff_mode=args.diff_mode,
-            xlsx_levels=args.xlsx_levels)
+    # --diff-mode None is a hard off switch for this run - overrides don't write either
+    diff_off = args.diff_mode is not None and args.diff_mode.strip().lower() == 'none'
+
+    try:
+        analyze(cache_path=args.cache, header=args.header, diff_mode=args.diff_mode,
+                diff_overrides={} if diff_off else None, xlsx_levels=args.xlsx_levels)
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
+        raise SystemExit(f"\n{exc}\n")
 
 
 if __name__ == '__main__':

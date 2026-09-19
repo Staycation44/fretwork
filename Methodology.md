@@ -115,13 +115,15 @@ Drums share the same windowing idea as the 5 Fret instruments (a 1-second window
 
 **TPS (Travel Per Second)** is the VPS equivalent, but two things are different from 5 Fret. Only lanes newly struck count, as there is no release equivalent for drums. Second, lane position matters: a hand moving from the hi-hat to a far crash cymbal is a bigger physical reach than a hand moving to the adjacent snare, so each newly-struck lane is scored by its distance to the nearest lane already being hit. That raw distance is compressed by a square root so one big cross-kit reach doesn't dominate a passage of many small movements the way an uncompressed distance would.
 
->**Travel Examples** (lanes numbered 0-4 left to right):
+>**Travel Examples** (lanes numbered 0-4 by chart lane: 0 red/snare, 1 yellow/hi-hat, 2 blue, 3 orange (5 lane) or green (4 lane), 4 green (5 lane)):
 >
->Hat → Hat - same lane, nothing new struck, $t = 0$
+>Hat → Hat (lane 1 → 1) - same lane, nothing new struck, $t = 0$
 >
->Hat → Hat+Snare (lane 0 → {0,1}) - 1 new lane, distance 1, $t = 1^{0.5} = 1$
+>Hat → Hat+Snare (lane 1 → {0,1}) - 1 new lane, distance 1, $t = 1^{0.5} = 1$
 >
->Hat → Crash (lane 0 → 4) - 1 new lane, distance 4, $t = 4^{0.5} = 2$
+>Snare → 4 lane Green / Crash (lane 0 → 3) - 1 new lane, distance 3, $t = 3^{0.5} \approx 1.73$
+>
+>Snare → 5 lane Green (lane 0 → 4) - 1 new lane, distance 4, $t = 4^{0.5} = 2$
 >
 >Silence → Hat+Snare - nothing struck immediately before, pure addition, $t = 2$ (no compression)
 
@@ -197,6 +199,8 @@ D = (H + T + K) \cdot CoV \cdot STAM
 $$
 
 $D$ is computed once per kick reading - `D_1x` for single pedal, `D_2x` for double kick variants where they exist. RemapDiff & CalcTier anchor to `D_1x`, since 1x is the reading every chart has.
+
+A song with no kick notes at all still scores as $D = (H + T) \cdot STAM$.
 
 ### What's missing <!-- omit in toc -->
 
@@ -349,13 +353,13 @@ Reference for the calibration tables behind `fret_formula.py`, `drum_formula.py`
 
 | Tier | D range        | Official | Remap |
 |------|----------------|---------:|------:|
-| 0    | (0, 9.1]       |    4.3%  |  4.3% |
-| 1    | (9.1, 13.6]    |   10.6%  | 10.7% |
-| 2    | (13.6, 20.3]   |   24.0%  | 23.9% |
-| 3    | (20.3, 28.0]   |   25.1%  | 25.2% |
-| 4    | (28.0, 36.9]   |   17.7%  | 17.7% |
-| 5    | (36.9, 53.5]   |   12.0%  | 11.9% |
-| 6    | (53.5, inf)    |    6.2%  |  6.3% |
+| 0    | (0, 11.3]      |    4.3%  |  4.3% |
+| 1    | (11.3, 16.6]   |   10.6%  | 10.7% |
+| 2    | (16.6, 24.5]   |   24.0%  | 23.9% |
+| 3    | (24.5, 33.5]   |   25.1%  | 25.2% |
+| 4    | (33.5, 44.5]   |   17.7%  | 17.7% |
+| 5    | (44.5, 65.6]   |   12.0%  | 11.9% |
+| 6    | (65.6, inf)    |    6.2%  |  6.3% |
 
 #### Bass (`BASS_REMAP_BINS`) <!-- omit in toc -->
 
@@ -414,7 +418,7 @@ Reference for the calibration tables behind `fret_formula.py`, `drum_formula.py`
 | Group  | BASE_D | LN_INC | D step per tier | Home |
 |--------|-------:|-------:|----------------:|----------|
 | G/B/K |   7.6 |  0.44 |            ~55% | `fret_formula.py` |
-| Drums  |   9.0 |  0.20 |           ~22% | `drum_formula.py` |
+| Drums  |   9.0 | 0.196 |           ~22% | `drum_formula.py` |
 | Vocals |   4.4 |  0.32 |           ~38% | `vocal_formula.py` |
 
 Guitar/Bass/Keys share both constants despite different D scales since they're mechanically similar.

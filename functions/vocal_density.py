@@ -28,7 +28,6 @@ Static features (sung notes only)
     Pitches    = distinct MIDI pitches used
     maxPitch   = highest sung pitch
     ShortFrac  = share of sung notes (slides/PHs included) shorter than SHORT_NOTE_MS
-    Span       = highest - lowest sung pitch
     talkieFrac = talkie onsets / NoteCount - descriptive, flags rap/spoken charts
 
 std values are used for CoV, same as 5 fret/drums
@@ -129,8 +128,7 @@ def _window_sum(times, values, grid, window_ms=WINDOW_MS):
 #            'active_sung':      ndarray,  # bool, any sung time in window
 #            'syllable_times':   ndarray,  # sorted syllable onsets (sung + talkie)
 #            'travel':           ndarray,  # per sung note travel (not windowed)
-#            'sung_times':       ndarray,  # sorted sung note onsets (slides/placeholders included)
-#            'pitch':            ndarray,  # per sung note pitch, sorted with sung_times
+#            'pitch':            ndarray,  # per sung note pitch, in onset order
 #            'sung_dur_ms':      ndarray,  # per sung note authored length
 #            'talkie_count':     int,
 #            'dur_ms':           float,    # latest end across sung/talkie/percussion
@@ -181,7 +179,6 @@ def window_arrays(notes, talkie, percussion=None, window_ms=WINDOW_MS, step_ms=S
         'active_sung': active_sung,
         'syllable_times': syllable_times,
         'travel': travel,
-        'sung_times': sung_t,
         'pitch': pitch,
         'sung_dur_ms': sung_end - sung_t,
         'talkie_count': int(talk_t.size),
@@ -192,8 +189,9 @@ def window_arrays(notes, talkie, percussion=None, window_ms=WINDOW_MS, step_ms=S
 
 
 # provides PPS/SPS + static pitch features to calculate D
-def calc_vocal_metrics(notes, talkie, percussion=None, window_ms=WINDOW_MS, step_ms=STEP_MS):
-    windows = window_arrays(notes, talkie, percussion, window_ms, step_ms)
+def calc_vocal_metrics(notes, talkie, percussion=None, window_ms=WINDOW_MS, step_ms=STEP_MS, windows=None):
+    if windows is None:
+        windows = window_arrays(notes, talkie, percussion, window_ms, step_ms)
     if windows is None:
         return None
 
@@ -215,11 +213,10 @@ def calc_vocal_metrics(notes, talkie, percussion=None, window_ms=WINDOW_MS, step
     if pitch.size:
         pitches = int(np.unique(pitch).size)
         max_pitch = int(pitch.max())
-        span = int(pitch.max() - pitch.min())
         short_frac = float(np.mean(windows['sung_dur_ms'] < SHORT_NOTE_MS))
     else:
         # talkie-only chart - nothing pitched
-        pitches = max_pitch = span = 0
+        pitches = max_pitch = 0
         short_frac = 0.0
 
     return {
@@ -227,7 +224,6 @@ def calc_vocal_metrics(notes, talkie, percussion=None, window_ms=WINDOW_MS, step
         'DurationS': dur_s,
         'Pitches': pitches,
         'maxPitch': max_pitch,
-        'Span': span,
         'ShortFrac': short_frac,
         'talkieFrac': windows['talkie_count'] / note_count if note_count else 0.0,
         'pPPS': float(pps_window_values.max()) if pps_window_values.size else 0.0,

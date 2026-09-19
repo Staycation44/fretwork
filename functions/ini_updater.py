@@ -4,21 +4,31 @@ INI_UPDATER - Updates or restores song.ini's diff_* values, one column per instr
 Restore calls restore_from_backup() directly and skips metrics/spreadsheet generation
 
 update_ini_values() patches with targeted line replacements inside the [song] section,
-preserving everything else in the file and preventing the BOM/encoding from being changed
-It will also add any key that doesn't already exist
+preserving everything else in the file byte-for-byte (encoding, BOM/byte order, undecodable bytes)
+    - every occurrence of a key is updated (the parser reads the last duplicate, the game may read either)
+    - keys that don't exist yet are added at the end of [song], a value of None removes the key
+    - files are only rewritten when something actually changed, via a temp file + os.replace
 
-The backup CSV lives with the cache files
+The backup CSV lives with the cache files:
+    - one row per song, one column per instrument's diff_* tag
+    - a blank cell means that instrument has not been backed up & Analyze won't write to it
+    - 'missing' means song.ini had no tag for it, Restore removes the key again
+    - Build fills blank cells from the current song.ini (safe, since nothing is written to a blank cell)
 """
 
 import csv
 import os
 import pathlib
+import shutil
 
 from functions import instruments, timestamp
 
 # backup CSV columns: song_path + one column per instrument's actual ini tag name
 BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
 VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
+
+# backup cell for a song.ini that had no tag for that instrument
+MISSING = "missing"
 
 # song folder -> its song.ini, joined by pathlib so the separator matches song_path's
 def song_ini_path(song_path):
@@ -28,21 +38,38 @@ def song_ini_path(song_path):
 # ini read/write
 # ---------------------------------------------------------------------
 
+# -> (text, codec) where codec = (python codec, BOM bytes, error handler) round-trips the file exactly
+# surrogateescape/surrogatepass keep undecodable bytes / lone surrogates intact through a rewrite
 def _read_text(file):
     raw = pathlib.Path(file).read_bytes()
-    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
-        return raw.decode('utf-16', errors='replace'), 'utf-16'
-    if raw.startswith(b'\xef\xbb\xbf'):
-        return raw.decode('utf-8-sig'), 'utf-8-sig'
+    if raw.startswith(b'\xff\xfe'):
+        codec = ('utf-16-le', b'\xff\xfe', 'surrogatepass')
+    elif raw.startswith(b'\xfe\xff'):
+        codec = ('utf-16-be', b'\xfe\xff', 'surrogatepass')
+    elif raw.startswith(b'\xef\xbb\xbf'):
+        codec = ('utf-8', b'\xef\xbb\xbf', 'surrogateescape')
+    else:
+        try:
+            raw.decode('utf-8')
+            codec = ('utf-8', b'', 'surrogateescape')
+        except UnicodeDecodeError:
+            codec = ('cp1252', b'', 'surrogateescape')
+    name, bom, errors = codec
+    return raw[len(bom):].decode(name, errors=errors), codec
+
+
+# temp file in the same folder + os.replace, so an interrupted write never truncates song.ini
+def _write_text(file, text, codec):
+    name, bom, errors = codec
+    file = pathlib.Path(file)
+    tmp = file.with_name(file.name + ".fretwork.tmp")
     try:
-        return raw.decode('utf-8'), 'utf-8'
-    except UnicodeDecodeError:
-        return raw.decode('cp1252', errors='replace'), 'cp1252'
-
-
-def _write_text(file, text, encoding):
-    errors = 'strict' if encoding in ('utf-8', 'utf-8-sig') else 'replace'
-    pathlib.Path(file).write_bytes(text.encode(encoding, errors=errors))
+        tmp.write_bytes(bom + text.encode(name, errors=errors))
+        shutil.copymode(file, tmp)
+        os.replace(tmp, file)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 # bounds (start, end) of the [song] section body (end exclusive)
@@ -60,12 +87,13 @@ def _song_section_bounds(lines):
     return None, None
 
 # Patches any number of key = value lines inside [song]
-# Leaves everything else alone, new keys at end
+# Every occurrence of a key is updated, a None value removes the key, new keys go at the end
+# Leaves everything else alone - returns True only if the file was rewritten
 def update_ini_values(ini_path, values):
     if not values:
-        return
+        return False
 
-    text, encoding = _read_text(ini_path)
+    text, codec = _read_text(ini_path)
     newline = '\r\n' if '\r\n' in text else '\n'
     ends_with_newline = text.endswith(('\n', '\r\n'))
     lines = text.splitlines()
@@ -76,49 +104,62 @@ def update_ini_values(ini_path, values):
 
     # keyed lowercase for matching, carrying the original key spelling for the append case
     pending = {key.strip().lower(): (key, value) for key, value in values.items()}
+    found = set()
 
-    for i in range(start, end):
-        if not pending:
-            break
-        stripped = lines[i].strip()
-        if not stripped or stripped[0] in ';#' or '=' not in stripped:
-            continue
-        k = stripped.split('=', 1)[0].strip().lower()
-        if k not in pending:
-            continue
+    out = lines[:start]
+    for line in lines[start:end]:
+        stripped = line.strip()
+        if stripped and stripped[0] not in ';#' and '=' in stripped:
+            k = stripped.split('=', 1)[0].strip().lower()
+            if k in pending:
+                found.add(k)
+                _key, value = pending[k]
+                if value is None:
+                    continue  # tag removed
+                eq_idx = line.index('=')
+                prefix = line[:eq_idx + 1]
+                had_space = line[eq_idx + 1:eq_idx + 2] == ' '
+                line = f"{prefix}{' ' if had_space else ''}{value}"
+        out.append(line)
 
-        # first occurrence of a key wins
-        _key, value = pending.pop(k)
-        line = lines[i]
-        eq_idx = line.index('=')
-        prefix = line[:eq_idx + 1]
-        had_space = line[eq_idx + 1:eq_idx + 2] == ' '
-        lines[i] = f"{prefix}{' ' if had_space else ''}{value}"
+    for k, (key, value) in pending.items():
+        if k not in found and value is not None:
+            out.append(f"{key} = {value}")
+    out.extend(lines[end:])
 
-    for key, value in pending.values():
-        lines.insert(end, f"{key} = {value}")
-        end += 1
-
-    new_text = newline.join(lines)
+    new_text = newline.join(out)
     if ends_with_newline:
         new_text += newline
 
-    _write_text(ini_path, new_text, encoding)
+    if new_text == text:
+        return False
+    _write_text(ini_path, new_text, codec)
+    return True
 
 
 # ---------------------------------------------------------------------
-# Backup - written by build.py / read by restore_from_backup()
+# Backup - written by build.py / read by restore_from_backup() and the write guard
 # ---------------------------------------------------------------------
 
 def backup_csv_path(header):
     return timestamp.output_dir('backup') / f"{header}_BackupData.csv"
 
 
-def _existing_backup_paths(backup_csv):
+# song.ini difficulty value -> backup cell (None = no tag in song.ini)
+def _cell(value):
+    return MISSING if value is None else str(value)
+
+
+# song_path -> row dict (every BACKUP_COLUMNS name present, blank where empty)
+def load_backup_rows(header):
+    backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
-        return set()
+        return {}
     with open(backup_csv, "r", newline="", encoding="utf-8") as f:
-        return {row["song_path"] for row in csv.DictReader(f)}
+        return {
+            row["song_path"]: {col: (row.get(col) or '') for col in BACKUP_COLUMNS}
+            for row in csv.DictReader(f)
+        }
 
 
 # Brings a backup CSV's header up to BACKUP_COLUMNS (adding new instruments)
@@ -157,53 +198,89 @@ def migrate_backup_header(backup_csv):
     return True
 
 
-# song_path -> {instrument_key: original diff value}, from the backup CSV
+# song_path -> {instrument_key: backup cell}, from the backup CSV
+# cells are raw: '' = not backed up, 'missing' = song.ini had no tag, otherwise the original value
 # Used by render.py to show the original difficulty
 def load_backup_diffs(header):
-    backup_csv = backup_csv_path(header)
-    if not backup_csv.exists():
-        return {}
-    out = {}
-    with open(backup_csv, "r", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            out[row["song_path"]] = {
-                instrument_key: (row.get(diff_tag) or '-1')
-                for instrument_key, diff_tag in instruments.DIFF_TAGS.items()
-            }
-    return out
+    return {
+        song_path: {
+            instrument_key: row[diff_tag]
+            for instrument_key, diff_tag in instruments.DIFF_TAGS.items()
+        }
+        for song_path, row in load_backup_rows(header).items()
+    }
 
-# songs: iterable of (song_path, difficulties) pairs
+
+# Other headers' backups that already cover some of these songs - {header: overlap count}
+# Checked by build when this header has no backup yet: if Analyze wrote to those songs under
+# the other header, a fresh backup here would capture the written values as originals
+def other_header_overlap(header, song_paths):
+    song_paths = set(str(p) for p in song_paths)
+    own = backup_csv_path(header).resolve()
+    overlap = {}
+    for other in sorted(timestamp.output_dir('backup').glob("*_BackupData.csv")):
+        if other.resolve() == own:
+            continue
+        with open(other, "r", newline="", encoding="utf-8") as f:
+            count = sum(1 for row in csv.DictReader(f) if row.get("song_path") in song_paths)
+        if count:
+            overlap[other.name[:-len("_BackupData.csv")]] = count
+    return overlap
+
+
+# songs: iterable of (song_path, difficulties) pairs, difficulties {instrument_key: value or None}
+# New songs get a row, existing rows get their blank cells filled for the instruments given
+# (a filled cell is never overwritten). Returns (rows_added, cells_filled)
 def backup_data(songs, header):
     backup_csv = backup_csv_path(header)
     backup_csv.parent.mkdir(parents=True, exist_ok=True)
     migrate_backup_header(backup_csv)
-    existing_paths = _existing_backup_paths(backup_csv)
-    is_new = not backup_csv.exists()
 
-    new_rows = []
+    fieldnames = list(BACKUP_COLUMNS)
+    rows = []
+    if backup_csv.exists():
+        with open(backup_csv, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames or fieldnames   # may carry extra (newer) columns
+            rows = list(reader)
+    by_path = {row["song_path"]: row for row in rows}
+
+    added = 0
+    filled = 0
     for song_path, difficulties in songs:
-        if str(song_path) in existing_paths:
-            continue
+        song_path = str(song_path)
         difficulties = difficulties or {}
-        row = {"song_path": str(song_path)}
-        for instrument_key, diff_tag in instruments.DIFF_TAGS.items():
-            row[diff_tag] = str(difficulties[instrument_key]) if instrument_key in difficulties else ''
-        new_rows.append(row)
+        row = by_path.get(song_path)
+        if row is None:
+            row = {"song_path": song_path}
+            for instrument_key, diff_tag in instruments.DIFF_TAGS.items():
+                row[diff_tag] = _cell(difficulties[instrument_key]) if instrument_key in difficulties else ''
+            rows.append(row)
+            by_path[song_path] = row
+            added += 1
+            continue
+        for instrument_key, value in difficulties.items():
+            diff_tag = instruments.DIFF_TAGS[instrument_key]
+            if not row.get(diff_tag):
+                row[diff_tag] = _cell(value)
+                filled += 1
 
-    if not new_rows:
-        return 0
+    if not (added or filled):
+        return 0, 0
 
-    with open(backup_csv, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=BACKUP_COLUMNS)
-        if is_new:
-            writer.writeheader()
-        writer.writerows(new_rows)
+    tmp = backup_csv.with_suffix(backup_csv.suffix + ".tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore', restval='')
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(tmp, backup_csv)
 
-    return len(new_rows)
+    return added, filled
 
 
 # Restores every song.ini for header back to its backed-up diff_* values
-# Returns (restored_count, failures) if a song folder was moved, deleted, etc
+# 'missing' cells remove the tag again, blank cells are left alone
+# Returns (restored_count, unchanged_count, failures) - failures if a song folder was moved, deleted, etc
 def restore_from_backup(header):
     backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
@@ -211,43 +288,45 @@ def restore_from_backup(header):
     migrate_backup_header(backup_csv)
 
     restored = 0
+    unchanged = 0
     failed = []
-    with open(backup_csv, "r", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            song_path = row["song_path"]
+    for song_path, row in load_backup_rows(header).items():
+        values = {
+            diff_tag: (None if row[diff_tag] == MISSING else row[diff_tag])
+            for diff_tag in instruments.DIFF_TAGS.values()
+            if row[diff_tag]
+        }
+        if not values:
+            continue  # every column blank, leave song.ini alone
 
-            values = {
-                diff_tag: row[diff_tag]
-                for diff_tag in instruments.DIFF_TAGS.values()
-                if row.get(diff_tag)
-            }
-            if not values:
-                continue  # every column blank, leave song.ini alone
+        ini_path = song_ini_path(song_path)
+        if not ini_path.is_file():
+            # song folder moved or deleted since BUILD
+            failed.append((song_path, None, 'FileNotFoundError', f"no song.ini at {ini_path}"))
+            continue
 
-            ini_path = song_ini_path(song_path)
-            if not ini_path.is_file():
-                # song folder moved or deleted since BUILD
-                failed.append((song_path, None, 'FileNotFoundError', f"no song.ini at {ini_path}"))
-                continue
-
-            try:
-                update_ini_values(ini_path, values)
+        try:
+            if update_ini_values(ini_path, values):
                 restored += 1
-            except Exception as exc:
-                failed.append((song_path, None, type(exc).__name__, str(exc)))
+            else:
+                unchanged += 1
+        except Exception as exc:
+            failed.append((song_path, None, type(exc).__name__, str(exc)))
 
-    return restored, failed
+    return restored, unchanged, failed
 
 
 # -----------------------------------------------------------------------------
-# SYNC - config.DIFF_WRITE_MODE drives ANALYZE behavior (none/write/restore)
+# SYNC - analyze.py resolves the per-instrument mode, this applies it (none/write/restore)
 # -----------------------------------------------------------------------------
 # mode:          None | "CalcTier" | "RemapDiff" | "Restore"
 # instrument:    which instrument's diff_* tag to write (required for CalcTier/RemapDiff,
 #                unused/omit for Restore - Restore always covers every instrument at once)
 # songs:         iterable of song_path for diff write modes
 # difficulties:  dict song_path -> {'RemapDiff': int, 'CalcTier': int} for diff write modes
-def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None):
+# backup_rows:   load_backup_rows(header), loaded once by the caller - songs without a
+#                backed-up cell for this instrument are skipped (their original isn't safe yet)
+def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None, backup_rows=None):
     if mode is None:
         return None
 
@@ -255,29 +334,42 @@ def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None
         raise ValueError(f"Unknown diff mode '{mode}', expected one of {VALID_MODES} or None")
 
     if mode == "Restore":
-        restored, failed = restore_from_backup(header)
+        restored, unchanged, failed = restore_from_backup(header)
         print(f"Restored {restored} song.inis from backup" +
+              (f", {unchanged} unchanged" if unchanged else "") +
               (f", {len(failed)} failed" if failed else ""))
-        return {"mode": mode, "restored": restored, "failed": failed}
+        return {"mode": mode, "restored": restored, "unchanged": unchanged, "failed": failed}
 
     if songs is None or difficulties is None or instrument is None:
         raise ValueError(f"diff mode '{mode}' needs songs + difficulties + instrument")
 
+    if backup_rows is None:
+        backup_rows = load_backup_rows(header)
     diff_tag = instruments.DIFF_TAGS[instrument]
 
     applied = 0
+    unchanged = 0
+    not_backed_up = 0
     failed = []
     for song_path in songs:
+        if not backup_rows.get(song_path, {}).get(diff_tag):
+            not_backed_up += 1
+            continue
         ini_path = song_ini_path(song_path)
         if not ini_path.is_file():
             failed.append((song_path, 'FileNotFoundError', f"no song.ini at {ini_path}"))
             continue
         try:
-            update_ini_values(ini_path, {diff_tag: difficulties[song_path][mode]})
-            applied += 1
+            if update_ini_values(ini_path, {diff_tag: difficulties[song_path][mode]}):
+                applied += 1
+            else:
+                unchanged += 1
         except Exception as exc:
             failed.append((song_path, type(exc).__name__, str(exc)))
 
     print(f"Applied {mode} to {applied} song.inis [{instrument}]" +
+          (f", {unchanged} unchanged" if unchanged else "") +
+          (f", {not_backed_up} not backed up (skipped)" if not_backed_up else "") +
           (f", {len(failed)} failed" if failed else ""))
-    return {"mode": mode, "instrument": instrument, "applied": applied, "failed": failed}
+    return {"mode": mode, "instrument": instrument, "applied": applied, "unchanged": unchanged,
+            "not_backed_up": not_backed_up, "failed": failed}

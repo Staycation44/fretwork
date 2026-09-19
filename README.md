@@ -6,7 +6,7 @@ Fretwork is an analysis tool to calculate difficulty values for **Full Band (Gui
 
 Libraries required: **pandas, numpy, tqdm, mido, matplotlib, and openpyxl** 
 
-![Render Example](https://github.com/Staycation44/fretwork/blob/Vocals-staging/renders/02139802XG_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
+![Render Example](https://github.com/Staycation44/fretwork/blob/main/renders/02139802XG_Dragonforce%20-%20Through%20The%20Fire%20Flames.png)
 
 ## Using Fretwork <!-- omit in toc -->
 To use the tool setup **config** and run these in order:
@@ -69,6 +69,8 @@ Note state (strum/hopo/tap), note length, and star power/solo phrases are not pa
 - `{header}_errors_{timestamp}.csv`: Only generated if some songs failed to parse, this lists which file failed and why (e.g. missing valid instruments, corrupt midi file)
 - `{header}_BackupData.csv`: A backup that stores all difficulties that were found at the time of building
 
+**Cache files are Python pickles** - loading one can run code, so only load caches you built yourself for safety.
+
 Cache, errors, and backup all land in `caches/` & the metrics spreadsheet lands in `metrics/`.
 
 **Optional arguments:**
@@ -109,12 +111,25 @@ Drums use the 1x kick reading, Vocals only have the one D
 **Optional arguments:**
 
 - `--header`: analyze a different library's most recent cache
-- `--cache`: point at a specific cache file, instead of most recent for the header
-- `--diff-mode`: `CalcTier`, `RemapDiff`, or `Restore`. (`None` to leave `song.ini` alone)
+- `--cache`: point at a specific cache file, instead of most recent for the header (a bare filename is looked up in `caches/`)
+- `--diff-mode`: `CalcTier`, `RemapDiff`, `Restore`, or `None` (not case sensitive)
   - `CalcTier`/`RemapDiff` writes selected value into every song's own `diff_*` tag, per instrument
   - `Restore` returns every instrument's `diff_*` values back to its `{header}_BackupData.csv` original, throws errors for songs moved/deleted
+  - `None` leaves every `song.ini` alone for this run, even if `DIFF_WRITE_MODE`/`DIFF_WRITE_OVERRIDES` would write
+- `--xlsx-levels`: which EMHX levels go in the spreadsheet for this run, e.g. `X`, `EX`, `EMHX`, or `ALL` (default: `XLSX_LEVELS` in the config). This only filters rows - `song.ini` writes use the Expert anchor either way
 
 **Per-instrument exceptions:** `DIFF_WRITE_OVERRIDES` in the config lets individual instruments use a different mode than `--diff-mode`/`DIFF_WRITE_MODE`, or skip writing.
+- Overrides still apply when `DIFF_WRITE_MODE` is `None` - only the listed instruments are written
+- `Restore` always restores every instrument and ignores overrides (`Restore` isn't a valid override)
+- An unknown mode or instrument key stops Analyze before anything runs
+
+**How writes stay safe:**
+- The spreadsheet is saved first, `song.ini` files are written last
+- A value is only written where `{header}_BackupData.csv` already holds that song/instrument's original, anything else is reported as `not backed up (skipped)`
+- Values that match the write aren't rewritten, so repeat runs report them as `unchanged`
+- Band is only written for songs with a Band row (2+ core instruments with an Expert D score)
+
+> **Upgrading from an earlier version:** Build now fills blank backup cells (e.g. the `diff_vocals` column added with Vocals) from the current `song.ini`. If you already wrote Vocals difficulties with an earlier version, those written values will be captured as the "original". Restore first with the old version before rebuilding.
 
 **Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
 

@@ -6,10 +6,10 @@ Formatting:
     - autofilter & auto-fit column widths
     - Green<yellow<red color scale on the sheet's difficulty column(s)
     - Level (Easy/Medium/Hard/Expert) gets a fixed categorical fill
-    - Raw diagnostic/formula-component columns are hidden, not deleted
+    - Raw diagnostic/formula-component columns are only present with EXTRA_METRICS = True
 
 Per-sheet-group formatting: 
-fret sheets (Guitar/Bass/Keys) and the Drums sheet have different column sets
+fret sheets (Guitar/Bass/Keys), Drums, Vocals and Band each have their own column set (instruments.SHEET_PROFILES)
 
 Fully data-driven off instruments.py, a few hardcoded things below (strictly formatting)
 """
@@ -33,6 +33,7 @@ SCALE_RED = "FFC7CE"
 
 # RemapDiff/CalcTier being NaN means no Expert chart to anchor against (EMHX)
 # D_2x/NoteCount_2x being NaN means no 2x-kick reading at this level (drums)
+# Band rows are only written when RemapBandDiff/CalcBandTier are computable
 # Column names are unique across sheet shapes
 BLANK_PREDICATES = {
     'RemapDiff': pd.isna,
@@ -41,11 +42,6 @@ BLANK_PREDICATES = {
     'NoteCount_2x': pd.isna,
 }
 
-
-def float_cols_for(sheet_name):
-    """Float-column set for a sheet - single source of truth so analyze.py's pre-write
-    .round(2) pass and this module's '0.00' number-format both read the same set."""
-    return instruments.SHEET_PROFILES[sheet_name].float_cols
 
 # fixed per-level fill, lighter versions of RB's tier colors - a category, not a gradient
 LEVEL_FILL_COLORS = {

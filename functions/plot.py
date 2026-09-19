@@ -14,18 +14,26 @@ Vocals: Pitch/Syllables/D share an axis, D approximated by R*A*Pitch + S_WEIGHT*
     - Percussion is render-only (not part of D) and only drawn when the chart actually has any
 
 Light/dark themes can be set in config
+
+All three layouts share one set of helpers (axes styling, header, save) - only the curves differ
+Text is drawn with parse_math off, so '$' in names prints literally instead of as mathtext
+Fonts: DejaVu Sans (matplotlib's default) first, then whichever CJK-capable fonts are installed as
+per-glyph fallbacks (matplotlib 3.6+) - Latin text renders exactly as before
 """
 
+import contextlib
 import pathlib
 import re
+import warnings
 
 import matplotlib
 matplotlib.use('Agg')  # no display in a batch render
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 import config
-from functions import instruments
+from functions import instruments, timestamp
 
 # fixed header truncation limits - keeps PNG width consistent song to song
 TITLE_LIMIT = 44      # applied to song title and artist separately
@@ -37,6 +45,37 @@ KICK_MODE_LABELS = {
     '1x': '1x (single pedal)',
     '2x': '2x (double pedal)',
 }
+
+# primary font + fallbacks for glyphs it doesn't have (Japanese/Chinese/Korean titles)
+# only installed fonts are used, so missing ones never trigger 'font not found' warnings
+FONT_CANDIDATES = [
+    'DejaVu Sans',        # matplotlib default - all Latin text
+    'Noto Sans CJK JP',   # Linux / manually installed
+    'Noto Sans JP',
+    'Yu Gothic',          # Windows
+    'Meiryo',
+    'Microsoft YaHei',
+    'Malgun Gothic',
+    'Hiragino Sans',      # macOS
+    'Arial Unicode MS',
+]
+_FONT_FAMILY = None
+
+
+def _font_family():
+    global _FONT_FAMILY
+    if _FONT_FAMILY is None:
+        installed = {f.name for f in font_manager.fontManager.ttflist}
+        _FONT_FAMILY = [name for name in FONT_CANDIDATES if name in installed] or ['DejaVu Sans']
+    return _FONT_FAMILY
+
+
+# fonts + quiet missing-glyph warnings (a glyph no installed font has still renders as a box)
+@contextlib.contextmanager
+def _render_context():
+    with plt.rc_context({'font.family': _font_family()}), warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message=r'Glyph .* missing from')
+        yield
 
 #-------------
 # Filename
@@ -93,6 +132,17 @@ def _d_display(difficulty):
         return f"D {d_1x:.2f}"
     return f"D {difficulty['D']:.2f}"
 
+# 'diff' shown in the header:
+#   original_diff is the backup CSV cell for this song/instrument, or None when the song isn't backed up
+#   backed up    -> the original value ('-' when blank, or when song.ini had no tag)
+#   not backed up -> the value song.ini had at Build, marked '(ini)' since it may be a written value
+def _diff_label(meta, instrument_key, original_diff):
+    if original_diff is not None:
+        return original_diff if original_diff not in ('', 'missing') else '-'
+    ini_diff = (meta.get('Difficulty') or {}).get(instrument_key)
+    return f"{ini_diff} (ini)" if ini_diff is not None else '-'
+
+
 # metadata line - level+instrument / charter / release (tag) / file type / D / calc tier / remap bin
 def meta_header(entry, difficulty, original_diff=None):
     meta = entry.get('meta', {})
@@ -109,10 +159,8 @@ def meta_header(entry, difficulty, original_diff=None):
     if difficulty is not None:
         remap = difficulty.get('RemapDiff')
         calc_tier = difficulty.get('CalcTier')
-        ini_diff = (meta.get('Difficulty') or {}).get(instrument_key, '-')
-        diff_value = original_diff if original_diff is not None else ini_diff
         bits.append(_d_display(difficulty))
-        bits.append(f"diff {diff_value}")
+        bits.append(f"diff {_diff_label(meta, instrument_key, original_diff)}")
         bits.append(f"remap bin {remap if remap is not None else '-'}")
         bits.append(f"calc tier {calc_tier if calc_tier is not None else '-'}")
 
@@ -125,188 +173,37 @@ def _format_time(value, pos=None):
     return f"{minutes}:{seconds:02d}"
 
 #------------
-# Rendering - Separate blocks for 5 Fret / Vocals / Drums
+# Shared drawing helpers - one layout for 5 Fret / Vocals / Drums, only the curves differ
 #------------
 
-# render each Fret song
-#    entry: cache_mod.entries_by_code() result - a flattened song+instrument+level entry
-#    curves: output of functions.curves.calc_curves
-#    difficulty: optional dict (D/N/V/COV + Expert-anchored RemapDiff/CalcTier), for header
-#    original_diff: optional backed-up original diff_* value for this instrument, for header
-#    profile: style dict, defaults to RENDER_DEFAULT merged with the selected theme
-def render_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
-    profile = resolve_profile(profile)
-    out_dir = pathlib.Path(out_dir or config.RENDER_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def _time_seconds(curves):
+    return [ms / 1000.0 for ms in curves['time_ms']]
 
-    time_s = [ms / 1000.0 for ms in curves['time_ms']]
-    meta = entry.get('meta', {})
 
-    fig, ax_nv = plt.subplots(
-        figsize=tuple(profile['figsize']),
-        dpi=profile['dpi'],
-    )
-
+# figure + list of axes, themed background
+def _new_figure(profile, n_rows=1, height=None):
+    width, base_height = tuple(profile['figsize'])
+    fig, axes = plt.subplots(n_rows, 1, figsize=(width, height or base_height), dpi=profile['dpi'])
     fig.patch.set_facecolor(profile['figure_bg'])
-    ax_nv.set_facecolor(profile['axes_bg'])
+    return fig, ([axes] if n_rows == 1 else list(axes))
 
-    #D: filled backdrop
-    ax_nv.plot(time_s, curves['d_raw'], color=profile['color_d'],
-               linewidth=profile['linewidth'], zorder=3, label='~D')
-    if profile.get('fill_curves'):
-        ax_nv.fill_between(time_s, curves['d_raw'], color=profile['color_d'],
-                           alpha=profile['fill_alpha'], linewidth=0, zorder=2)
 
-    #NPS / VPS: dotted lines
-    ax_nv.plot(time_s, curves['nps'], color=profile['color_nps'],
-               linewidth=profile['linewidth'], linestyle=':',
-               zorder=3, label='Notes')
-    ax_nv.plot(time_s, curves['vps'], color=profile['color_vps'],
-               linewidth=profile['linewidth'], linestyle=':',
-               zorder=3, label='Variability')
-
-    ax_nv.set_ylabel('per second', fontsize=profile['label_size'],
-                     color=profile['text_color'])
-    ax_nv.tick_params(labelsize=profile['tick_size'], colors=profile['text_color'])
-    ax_nv.set_ylim(bottom=0)
-    ax_nv.grid(True, alpha=profile['grid_alpha'], linewidth=0.6,
-               color=profile['grid_color'])
-    ax_nv.margins(x=0)
-    for spine in ax_nv.spines.values():
-        spine.set_color(profile['spine_color'])
-
-    # x-axis: M:SS time scale
-    ax_nv.xaxis.set_major_formatter(FuncFormatter(_format_time))
-    ax_nv.xaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))
-    ax_nv.set_xlabel('Time (m:ss)', fontsize=profile['label_size'],
-                     color=profile['text_color'])
-
-    # Legend - horizontal below the axes
-    ax_nv.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
-                 ncol=3, frameon=False,
-                 fontsize=profile['tick_size'], labelcolor=profile['text_color'])
-
-    # Header - title row, metadata row under
-    title = (f"{_ellipsize(meta.get('Name', 'unk'), TITLE_LIMIT)}"
-             f" - {_ellipsize(meta.get('Artist', 'unk'), TITLE_LIMIT)}")
-    ax_nv.set_title(title, fontsize=profile['title_size'], loc='left',
-                    color=profile['text_color'], pad=profile['title_pad'])
-    ax_nv.text(0.0, 1.01, meta_header(entry, difficulty, original_diff),
-               transform=ax_nv.transAxes, ha='left', va='bottom',
-               fontsize=profile['tick_size'], color=profile['muted_text_color'])
-
-    fig.tight_layout(rect=(0, 0.06, 1, 1))
-
-    out_path = out_dir / output_filename(entry)
-    fig.savefig(out_path, bbox_inches='tight', facecolor=fig.get_facecolor())
-    plt.close(fig)
-
-    return out_path
-
-# render one vocals song
-#    entry: cache_mod.entries_by_code() result
-#    curves: output of functions.curves.calc_vocal_curves
-#    difficulty: optional dict (D/P/R/A/S/CoV/STAM + RemapDiff/CalcTier), for header
-#    original_diff: optional backed-up original diff_vocals value for this instrument, for header
-#    profile: style dict, defaults to RENDER_DEFAULT merged with the selected theme
-def render_vocal_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
-    profile = resolve_profile(profile)
-    out_dir = pathlib.Path(out_dir or config.RENDER_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    time_s = [ms / 1000.0 for ms in curves['time_ms']]
-    meta = entry.get('meta', {})
-    has_perc = curves.get('has_perc', False)
-
-    fig, ax = plt.subplots(
-        figsize=tuple(profile['figsize']),
-        dpi=profile['dpi'],
-    )
-
-    fig.patch.set_facecolor(profile['figure_bg'])
+# D as a filled backdrop + dotted component lines, then the shared axis styling
+# lines: [(values, profile color key, legend label), ...]
+def _style_axes(ax, time_s, profile, d_curve, lines, show_xlabel=True):
     ax.set_facecolor(profile['axes_bg'])
 
     # D: filled backdrop
-    ax.plot(time_s, curves['d_raw'], color=profile['color_d'],
-            linewidth=profile['linewidth'], zorder=3, label='~D')
-    if profile.get('fill_curves'):
-        ax.fill_between(time_s, curves['d_raw'], color=profile['color_d'],
-                        alpha=profile['fill_alpha'], linewidth=0, zorder=2)
-
-    # Pitch / Syllables: dotted lines
-    ax.plot(time_s, curves['pps'], color=profile['color_vps'],
-            linewidth=profile['linewidth'], linestyle=':',
-            zorder=3, label='Pitch')
-    ax.plot(time_s, curves['sps'], color=profile['color_nps'],
-            linewidth=profile['linewidth'], linestyle=':',
-            zorder=3, label='Syllables')
-
-    # Percussion: dotted line, only drawn when the chart actually has any
-    if has_perc:
-        ax.plot(time_s, curves['perc'], color=profile['color_kps'],
-                linewidth=profile['linewidth'], linestyle=':',
-                zorder=3, label='Percussion')
-
-    ax.set_ylabel('per second', fontsize=profile['label_size'],
-                  color=profile['text_color'])
-    ax.tick_params(labelsize=profile['tick_size'], colors=profile['text_color'])
-    ax.set_ylim(bottom=0)
-    ax.grid(True, alpha=profile['grid_alpha'], linewidth=0.6,
-            color=profile['grid_color'])
-    ax.margins(x=0)
-    for spine in ax.spines.values():
-        spine.set_color(profile['spine_color'])
-
-    # x-axis: M:SS time scale
-    ax.xaxis.set_major_formatter(FuncFormatter(_format_time))
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))
-    ax.set_xlabel('Time (m:ss)', fontsize=profile['label_size'],
-                  color=profile['text_color'])
-
-    # Legend - horizontal below the axes
-    ncol = 4 if has_perc else 3
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
-              ncol=ncol, frameon=False,
-              fontsize=profile['tick_size'], labelcolor=profile['text_color'])
-
-    # Header - title row, metadata row under
-    title = (f"{_ellipsize(meta.get('Name', 'unk'), TITLE_LIMIT)}"
-             f" - {_ellipsize(meta.get('Artist', 'unk'), TITLE_LIMIT)}")
-    ax.set_title(title, fontsize=profile['title_size'], loc='left',
-                 color=profile['text_color'], pad=profile['title_pad'])
-    ax.text(0.0, 1.01, meta_header(entry, difficulty, original_diff),
-            transform=ax.transAxes, ha='left', va='bottom',
-            fontsize=profile['tick_size'], color=profile['muted_text_color'])
-
-    fig.tight_layout(rect=(0, 0.06, 1, 1))
-
-    out_path = out_dir / output_filename(entry)
-    fig.savefig(out_path, bbox_inches='tight', facecolor=fig.get_facecolor())
-    plt.close(fig)
-
-    return out_path
-
-# style one drum graph (1x or stacked 1x/2x)
-def _style_drum_axes(ax, time_s, curves, mode, profile, show_xlabel):
-    ax.set_facecolor(profile['axes_bg'])
-
-    d_curve = curves['d_raw'][mode]
-    kps_curve = curves['kps'][mode]
-
-    # D: filled backdrop (H + T + K)
     ax.plot(time_s, d_curve, color=profile['color_d'],
             linewidth=profile['linewidth'], zorder=3, label='~D')
     if profile.get('fill_curves'):
         ax.fill_between(time_s, d_curve, color=profile['color_d'],
                         alpha=profile['fill_alpha'], linewidth=0, zorder=2)
 
-    # Hands / Travel / Kicks: dotted lines
-    ax.plot(time_s, curves['hps'], color=profile['color_nps'],
-            linewidth=profile['linewidth'], linestyle=':', zorder=3, label='Hands')
-    ax.plot(time_s, curves['tps'], color=profile['color_vps'],
-            linewidth=profile['linewidth'], linestyle=':', zorder=3, label='Travel')
-    ax.plot(time_s, kps_curve, color=profile['color_kps'],
-            linewidth=profile['linewidth'], linestyle=':', zorder=3, label='Kicks')
+    # components: dotted lines
+    for values, color_key, label in lines:
+        ax.plot(time_s, values, color=profile[color_key],
+                linewidth=profile['linewidth'], linestyle=':', zorder=3, label=label)
 
     ax.set_ylabel('per second', fontsize=profile['label_size'], color=profile['text_color'])
     ax.tick_params(labelsize=profile['tick_size'], colors=profile['text_color'])
@@ -316,68 +213,120 @@ def _style_drum_axes(ax, time_s, curves, mode, profile, show_xlabel):
     for spine in ax.spines.values():
         spine.set_color(profile['spine_color'])
 
-    # x-axis
+    # x-axis: M:SS time scale
     ax.xaxis.set_major_formatter(FuncFormatter(_format_time))
     ax.xaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))
     if show_xlabel:
         ax.set_xlabel('Time (m:ss)', fontsize=profile['label_size'], color=profile['text_color'])
 
-    # tag to id 1x/2x
-    if curves.get('has_2x'):
-        ax.text(0.995, 0.96, KICK_MODE_LABELS[mode], transform=ax.transAxes,
-                ha='right', va='top', fontsize=profile['tick_size'],
-                color=profile['muted_text_color'])
 
-# render one drums song
-#    entry: cache_mod.entries_by_code() result
-#    curves: output of functions.curves.calc_drum_curves
-#    difficulty: optional dict (D_1x, optional D_2x, Expert-anchored RemapDiff/CalcTier), for header
-#    original_diff: optional backed-up original diff_drums value for this instrument, for header
-#    profile: style dict, defaults to RENDER_DEFAULT merged with the selected theme
-def render_drum_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
-    profile = resolve_profile(profile)
-    out_dir = pathlib.Path(out_dir or config.RENDER_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
+# Legend - horizontal below the axes
+def _legend(ax, profile, ncol, handles=None, labels=None):
+    extra = {} if handles is None else {'handles': handles, 'labels': labels}
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.08),
+              ncol=ncol, frameon=False,
+              fontsize=profile['tick_size'], labelcolor=profile['text_color'], **extra)
 
-    time_s = [ms / 1000.0 for ms in curves['time_ms']]
+
+# Header - title row, metadata row under (parse_math off: '$' in names prints as-is)
+def _draw_header(ax, entry, difficulty, original_diff, profile):
     meta = entry.get('meta', {})
-    has_2x = curves.get('has_2x', False)
-
-    figsize = tuple(profile['figsize'])
-    # stacked layout gets close to double height
-    fig_height = figsize[1] * 1.9 if has_2x else figsize[1]
-
-    n_rows = 2 if has_2x else 1
-    fig, axes = plt.subplots(n_rows, 1, figsize=(figsize[0], fig_height), dpi=profile['dpi'])
-    axes = [axes] if n_rows == 1 else list(axes)
-
-    fig.patch.set_facecolor(profile['figure_bg'])
-
-    modes = ['1x', '2x'] if has_2x else ['1x']
-    for mode, ax in zip(modes, axes):
-        _style_drum_axes(ax, time_s, curves, mode, profile, show_xlabel=True)
-
-    # Legend - one shared legend below the bottom axes
-    handles, labels = axes[0].get_legend_handles_labels()
-    axes[-1].legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, -0.08),
-                     ncol=4, frameon=False,
-                     fontsize=profile['tick_size'], labelcolor=profile['text_color'])
-
-    # Header - title + metadata line above the top axes
     title = (f"{_ellipsize(meta.get('Name', 'unk'), TITLE_LIMIT)}"
              f" - {_ellipsize(meta.get('Artist', 'unk'), TITLE_LIMIT)}")
-    axes[0].set_title(title, fontsize=profile['title_size'], loc='left',
-                      color=profile['text_color'], pad=profile['title_pad'])
-    axes[0].text(0.0, 1.01, meta_header(entry, difficulty, original_diff),
-                 transform=axes[0].transAxes, ha='left', va='bottom',
-                 fontsize=profile['tick_size'], color=profile['muted_text_color'])
+    ax.set_title(title, fontsize=profile['title_size'], loc='left',
+                 color=profile['text_color'], pad=profile['title_pad'], parse_math=False)
+    ax.text(0.0, 1.01, meta_header(entry, difficulty, original_diff),
+            transform=ax.transAxes, ha='left', va='bottom',
+            fontsize=profile['tick_size'], color=profile['muted_text_color'], parse_math=False)
 
-    base_height = figsize[1]
-    bottom_margin = 0.06 * (base_height / fig_height)
+
+def _save(fig, entry, out_dir, bottom_margin=0.06):
     fig.tight_layout(rect=(0, bottom_margin, 1, 1))
-
     out_path = out_dir / output_filename(entry)
     fig.savefig(out_path, bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-
     return out_path
+
+
+def _resolve_out_dir(out_dir):
+    out_dir = pathlib.Path(out_dir) if out_dir else timestamp.project_path(config.RENDER_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+#------------
+# Rendering - 5 Fret / Vocals / Drums
+#------------
+# Shared arguments:
+#    entry: cache_mod.entries_by_code() result - a flattened song+instrument+level entry
+#    curves: output of the matching functions.curves calc_*_curves
+#    difficulty: optional dict for the header (D values + Expert-anchored RemapDiff/CalcTier)
+#    original_diff: backup CSV cell for this instrument, None if the song isn't backed up
+#    profile: style dict, defaults to RENDER_DEFAULT merged with the selected theme
+
+# render each Fret song - Notes / Variability
+def render_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
+    profile = resolve_profile(profile)
+    out_dir = _resolve_out_dir(out_dir)
+
+    with _render_context():
+        fig, (ax,) = _new_figure(profile)
+        _style_axes(ax, _time_seconds(curves), profile, curves['d_raw'], [
+            (curves['nps'], 'color_nps', 'Notes'),
+            (curves['vps'], 'color_vps', 'Variability'),
+        ])
+        _legend(ax, profile, ncol=3)
+        _draw_header(ax, entry, difficulty, original_diff, profile)
+        return _save(fig, entry, out_dir)
+
+# render one vocals song - Pitch / Syllables (+ Percussion when charted)
+def render_vocal_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
+    profile = resolve_profile(profile)
+    out_dir = _resolve_out_dir(out_dir)
+    has_perc = curves.get('has_perc', False)
+
+    lines = [
+        (curves['pps'], 'color_vps', 'Pitch'),
+        (curves['sps'], 'color_nps', 'Syllables'),
+    ]
+    # Percussion: only drawn when the chart actually has any
+    if has_perc:
+        lines.append((curves['perc'], 'color_kps', 'Percussion'))
+
+    with _render_context():
+        fig, (ax,) = _new_figure(profile)
+        _style_axes(ax, _time_seconds(curves), profile, curves['d_raw'], lines)
+        _legend(ax, profile, ncol=4 if has_perc else 3)
+        _draw_header(ax, entry, difficulty, original_diff, profile)
+        return _save(fig, entry, out_dir)
+
+# render one drums song - Hands / Travel / Kicks, 2x stacked under 1x when charted
+def render_drum_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
+    profile = resolve_profile(profile)
+    out_dir = _resolve_out_dir(out_dir)
+    has_2x = curves.get('has_2x', False)
+    time_s = _time_seconds(curves)
+
+    # stacked layout gets close to double height
+    base_height = tuple(profile['figsize'])[1]
+    fig_height = base_height * 1.9 if has_2x else base_height
+    modes = ['1x', '2x'] if has_2x else ['1x']
+
+    with _render_context():
+        fig, axes = _new_figure(profile, n_rows=len(modes), height=fig_height)
+        for mode, ax in zip(modes, axes):
+            _style_axes(ax, time_s, profile, curves['d_raw'][mode], [
+                (curves['hps'], 'color_nps', 'Hands'),
+                (curves['tps'], 'color_vps', 'Travel'),
+                (curves['kps'][mode], 'color_kps', 'Kicks'),
+            ])
+            # tag to id 1x/2x
+            if has_2x:
+                ax.text(0.995, 0.96, KICK_MODE_LABELS[mode], transform=ax.transAxes,
+                        ha='right', va='top', fontsize=profile['tick_size'],
+                        color=profile['muted_text_color'])
+
+        # one shared legend below the bottom axes
+        handles, labels = axes[0].get_legend_handles_labels()
+        _legend(axes[-1], profile, ncol=4, handles=handles, labels=labels)
+        _draw_header(axes[0], entry, difficulty, original_diff, profile)
+        return _save(fig, entry, out_dir, bottom_margin=0.06 * (base_height / fig_height))

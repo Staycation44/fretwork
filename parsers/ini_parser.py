@@ -13,6 +13,7 @@ import pandas as pd
 import tqdm
 
 from functions import instruments
+from parsers.text_decode import read_text
 
 # --------------
 # Source tables
@@ -60,23 +61,12 @@ DETAG = re.compile(r"<.*?>")
 # Parsing
 # --------
 
-# no declared encoding - usually utf-8, cp1252 from older tools, utf-16 if saved from notepad
-def _read_text(file):
-    raw = file.read_bytes()
-    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
-        return raw.decode('utf-16', errors='replace')
-    try:
-        return raw.decode('utf-8-sig')
-    except UnicodeDecodeError:
-        return raw.decode('cp1252', errors='replace')
-
-
 # key = value parse, same as chart_parser.parse_chart
 # not configparser - it chokes on % and line breaks in loading_phrase
 # [section] lines skipped (only ever [song]), keys lowercased, last dupe wins
 def parse_ini(file):
     ini = {}
-    for line in _read_text(file).splitlines():
+    for line in read_text(file).splitlines():
         line = line.strip()
         if not line or line[0] in ';#[':
             continue
@@ -99,9 +89,8 @@ def ini_metadata(file):
     icon = ini.get('icon', '')
 
     # one difficulty value per instrument, keyed the same way as everywhere else
-    # (instrument key, not the raw ini tag name) - '-1' default matches prior single-tag behavior
     difficulties = {
-        instrument_key: ini.get(diff_tag, '-1')
+        instrument_key: ini.get(diff_tag)
         for instrument_key, diff_tag in instruments.DIFF_TAGS.items()
     }
 
@@ -131,10 +120,10 @@ def ini_metadata(file):
 # -----------
 
 # loops through search_path and provides errors to output along with cache
-def ini_loop(search_path, errors=None):
+def ini_loop(search_path, errors=None, files=None):
     ini_out = []
-    search = pathlib.Path(search_path)
-    files = list(search.rglob("song.ini"))
+    if files is None:
+        files = list(pathlib.Path(search_path).rglob("song.ini"))
 
     for file in tqdm.tqdm(files, desc="Gathering ini data", unit="file"):
         try:

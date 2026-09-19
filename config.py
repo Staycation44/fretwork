@@ -13,7 +13,9 @@ A header of "FullTest" gives you:
 
 changing the header here also defines the cache Analyze will calculate from 
 AND which cache Render will use for visualization retrieval codes (overridable with args)
-AND which backup file Analyze will use to restore song.ini diff_guitar values (overridable with args)
+AND which backup file Analyze will use to restore song.ini diff_* values
+
+HEADER can't contain < > : " / | ? * or a backslash (it names files) - Build/Analyze/Render stop early if it does
 """
 
 # ------
@@ -21,6 +23,7 @@ AND which backup file Analyze will use to restore song.ini diff_guitar values (o
 # ------
 
 # Library to scan. set here or override on the command line with --search-path.
+# Build stops with "check SEARCH_PATH" if this folder doesn't exist
 SEARCH_PATH = r"C:\Users\[user]\Documents\Clone Hero\Songs" # edit to your library path before running Build
 
 # Identifies the run. Overridable with --header.
@@ -48,13 +51,19 @@ EXTRA_METRICS = False
 #   "RemapDiff"  - writes the manual 0-6 remap instead to each instrument's own diff_*
 #   "Restore"    - restore every song.ini's diff_* tags to backup from BUILD - always all instruments
 #
-# Overridable per-run with --diff-mode on ANALYZE
+# Mode names aren't case sensitive ("calctier" works) anything unrecognized stops ANALYZE before it starts
+#
+# Overridable per-run with --diff-mode on ANALYZE (--diff-mode None writes nothing, overrides included)
 # Safest to leave this at None and use --diff-mode when you actually want to override
 
 DIFF_WRITE_MODE = None # None | "CalcTier" | "RemapDiff" | "Restore"
 
-# DIFF_WRITE_OVERRIDES 
+# DIFF_WRITE_OVERRIDES
 # lets specific instruments use a different mode than DIFF_WRITE_MODE above (or skip writing)
+#   - applies even when DIFF_WRITE_MODE is None - only the instruments listed here are written
+#   - ignored when DIFF_WRITE_MODE is "Restore" (Restore always covers every instrument)
+#   - "Restore" isn't a valid override, and unknown instrument keys stop ANALYZE before it starts
+# instrument keys: guitar, coop, rhythm, bass, keys, drums, vocals, band
 DIFF_WRITE_OVERRIDES = {} # {instrument_key: "CalcTier" | "RemapDiff" | None}
 
 '''
@@ -68,6 +77,7 @@ DIFF_WRITE_OVERRIDES = {
     "bass":     None,          # skip - bass song.ini left untouched
     "keys":     None,          # skip - keys song.ini left untouched
     "drums":   "RemapDiff",    # override to the 0-6 remap instead
+    "band":     None,          # skip - band song.ini left untouched
 
     Vocals not in overrides means it will fall back to DIFF_WRITE_MODE
 }
@@ -133,6 +143,7 @@ PARSE_MAX_WORKERS = None
 
 #------------------------------
 # Output directories - DON'T NEED TO EDIT, these dump to the tool's folder
+# relative paths are anchored to the tool's folder
 #------------------------------
 RENDER_DIR = 'renders'
 
