@@ -59,19 +59,15 @@ Under `RENDER_DEFAULT` and `RENDER_THEMES`, you can tweak how `render.py's` PNGs
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
-Note state (strum/hopo/tap), note length, and star power/solo phrases are not parsed.
+**If you ran a prior version, you will need to rebuild your cache with the addition of Drums & Vocals**
 
-**If you ran a prior version, you will need to rebuild your cache with the addition of Drums / Vocals**
-
-**Outputs:**
+**Outputs in `/caches` folder:**
 
 - `{header}_cache_{timestamp}.pkl`: The main output used by Analyze and Render
 - `{header}_errors_{timestamp}.csv`: Only generated if some songs failed to parse, this lists which file failed and why (e.g. missing valid instruments, corrupt midi file)
 - `{header}_BackupData.csv`: A backup that stores all difficulties that were found at the time of building
 
 **Cache files are Python pickles** - loading one can run code, so only load caches you built yourself for safety.
-
-Cache, errors, and backup all land in `caches/` & the metrics spreadsheet lands in `metrics/`.
 
 **Optional arguments:**
 - `--search-path`: scan a different folder than the one in `config.py`
@@ -85,15 +81,13 @@ Cache, errors, and backup all land in `caches/` & the metrics spreadsheet lands 
 
 Optionally, `analyze.py` can also update each instrument's `song.ini` `diff_*` tag for use in-game. You can also restore all of them to the original assigned value. This option runs via args or `DIFF_WRITE_MODE` in the config.
 
-**Outputs:**
+**Outputs in `/metrics` folder:**
 
 An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx` with:
 - **One tab per instrument group** that has data in the cache, filterable by `E`/`M`/`H`/`X` levels
-- **Retrieval codes** - an 8-digit song hash plus a level letter (`E`/`M`/`H`/`X`) and an instrument letter (`G`/`C`/`R`/`B`/`K`/`D`/`V`), e.g. `04821993XG` for an Expert Guitar song - used to render graphs (Vocals codes always carry `X`)
+- **Retrieval codes** - an 8-digit song hash plus level(`E`/`M`/`H`/`X`) and instrument (`G`/`C`/`R`/`B`/`K`/`D`/`V`), ex. `04821993XG` for an Expert Guitar song
 - **Metadata** - Song Title, Artist, Level, Type (Instrument), Charter, Release/Source, Difficulty (song.ini diff tags)
 - **D scores** & updated Remap/CalcTier numbers
-
-Each tab is formatted for browsing using `xlsx_format.py`
 
 Using `XLSX_LEVELS` in the config you can adjust the mix of Easy/Medium/Hard/Expert you want in the sheet.
 
@@ -102,11 +96,8 @@ The raw formula components are dropped by default but they can be included as hi
 **Full D formula, Remap tables, & CalcTier detail in `Methodology.md`**
 
 In the metrics spreadsheet / render header, you'll see D translated two ways:
-- **RemapDiff (0–6):** A manual grouping, calibrated to roughly match the percentage of official releases across the seven tiers & capped at 6.
-- **CalcTier:** A continuous, log-scaled tiering calculation. Every set natural-log increase in D over a baseline value increments the tier by one. This value is not capped, so tiers can extend well past 6 to provide additional granularity. Guitar/Bass/Keys share one scale, Drums and Vocals each have their own.
-
-**RemapDiff and CalcTier are computed once per song/instrument, from the Expert level D only** 
-Drums use the 1x kick reading, Vocals only have the one D
+- **RemapDiff (0–6):** A manual grouping, calibrated to roughly match the percentage of official releases across the tiers. Capped at 6.
+- **CalcTier:** A continuous, log-scaled tiering calculation. This value is not capped, so tiers can extend well past 6 as songs get harder.
 
 **Optional arguments:**
 
@@ -120,7 +111,7 @@ Drums use the 1x kick reading, Vocals only have the one D
 
 **Per-instrument exceptions:** `DIFF_WRITE_OVERRIDES` in the config lets individual instruments use a different mode than `--diff-mode`/`DIFF_WRITE_MODE`, or skip writing.
 - Overrides still apply when `DIFF_WRITE_MODE` is `None` - only the listed instruments are written
-- `Restore` always restores every instrument and ignores overrides (`Restore` isn't a valid override)
+- `Restore` always restores every instrument and ignores overrides
 - An unknown mode or instrument key stops Analyze before anything runs
 
 **How writes stay safe:**
@@ -185,10 +176,6 @@ Graphs are available in light or dark mode depending on the config.
 - Midi files misbehaving - *possibly parser drift / file corrruption/truncation?*
 
 **Extension Ideas:**
-- Vocal harmonies (`HARM1`-`HARM3`) - *doesn't seem worth the effort*
-- RB style band diff once all instruments are in
-  
-**Fork Ideas:**
 - Vocal harmonies (`HARM1`-`HARM3`)
 - Pro Instruments
 - Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
