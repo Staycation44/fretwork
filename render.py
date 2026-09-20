@@ -52,7 +52,7 @@ def _render_fret_entry(entry, out_dir, original_diffs):
             expert_metrics = metrics
         else:
             expert_metrics = fret_density.calc_metrics(expert_notes) if expert_notes is not None else None
-        anchor_remap, anchor_tier, _anchor_d = fret_formula.anchor_remap_tier(expert_metrics, entry['instrument'])
+        anchor_remap, anchor_tier = fret_formula.anchor_remap_tier(expert_metrics, entry['instrument'])
 
         difficulty = {
             **fret_formula.calc_nvcov(metrics),
@@ -83,7 +83,7 @@ def _render_drum_entry(entry, out_dir, original_diffs):
         else:
             expert_metrics = (drum_density.calc_drum_metrics(expert_notes, roll_spans=expert_roll_spans)
                               if expert_notes is not None else None)
-        anchor_remap, anchor_tier, _anchor_d = drum_formula.anchor_remap_tier(expert_metrics)
+        anchor_remap, anchor_tier = drum_formula.anchor_remap_tier(expert_metrics)
 
         difficulty = {
             'D_1x': drum_formula.calc_drum_d(metrics, '1x')['D'],

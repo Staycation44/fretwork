@@ -128,9 +128,9 @@ def calc_nvcov(metrics):
     }
 
 # RemapDiff/CalcTier anchored to the Expert level's D
-# Returns (RemapDiff, CalcTier, D) for band diff
+# Returns (RemapDiff, CalcTier)
 def anchor_remap_tier(expert_metrics, instrument='guitar'):
     if expert_metrics is None:
-        return None, None, None
+        return None, None
     expert_D = calc_nvcov(expert_metrics)['D']
-    return remap_diff(expert_D, instrument), calc_tier(expert_D), expert_D
+    return remap_diff(expert_D, instrument), calc_tier(expert_D)

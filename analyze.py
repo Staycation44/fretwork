@@ -161,10 +161,10 @@ def _vocal_row(code, meta, vocal_entry, metrics=None, d=None):
     }
 
 
-# One Band row per song. d_by_instrument: {instrument_key: D or None}, from song_anchor
+# One Band row per song. placements_by_instrument: {instrument_key: {'RemapDiff', 'CalcTier'}}, from difficulties_by_instrument
 # no row for single insturment songs / non-core band combos
-def _band_row(meta, charted_instruments, d_by_instrument):
-    band_result = band_formula.calc_band_d(d_by_instrument)
+def _band_row(meta, charted_instruments, placements_by_instrument):
+    band_result = band_formula.calc_band(placements_by_instrument)
     if band_result['RemapBandDiff'] is None:
         return None
 
@@ -332,9 +332,6 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     total = 0
     skipped = 0
 
-    # {song_path: {instrument_key: D}}
-    song_anchor = {}
-
     # one item per (song, instrument) - EMHX levels are handled inside the loop
     all_song_instruments = [
         (song_path, instrument_key, levels)
@@ -357,15 +354,13 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             if expert_entry is not None:
                 expert_roll_spans = roll_spans_by_level.get('expert', [])
                 expert_metrics = drum_density.calc_drum_metrics(expert_entry['notes'], roll_spans=expert_roll_spans)
-            anchor_remap, anchor_tier, anchor_D = drum_formula.anchor_remap_tier(expert_metrics)
+            anchor_remap, anchor_tier = drum_formula.anchor_remap_tier(expert_metrics)
 
             if anchor_remap is not None:
                 difficulties_by_instrument[instrument_key][song_path] = {
                     'RemapDiff': anchor_remap,
                     'CalcTier': anchor_tier,
                 }
-            if anchor_D is not None:
-                song_anchor.setdefault(song_path, {})[instrument_key] = anchor_D
 
             for level_key, inst_entry in levels.items():
                 if level_key not in selected_levels:
@@ -401,8 +396,6 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                     'RemapDiff': vocal_d['RemapDiff'],
                     'CalcTier': vocal_d['CalcTier'],
                 }
-            if vocal_d is not None:
-                song_anchor.setdefault(song_path, {})[instrument_key] = vocal_d['D']
 
             for level_key, inst_entry in levels.items():
                 if level_key not in selected_levels:
@@ -425,15 +418,13 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         # Expert's metrics are computed once here, they anchor RemapDiff/CalcTier
         expert_entry = levels.get('expert')
         expert_metrics = fret_density.calc_metrics(expert_entry['notes']) if expert_entry is not None else None
-        anchor_remap, anchor_tier, anchor_D = fret_formula.anchor_remap_tier(expert_metrics, instrument_key)
+        anchor_remap, anchor_tier = fret_formula.anchor_remap_tier(expert_metrics, instrument_key)
 
         if anchor_remap is not None:
             difficulties_by_instrument[instrument_key][song_path] = {
                 'RemapDiff': anchor_remap,
                 'CalcTier': anchor_tier,
             }
-        if anchor_D is not None:
-            song_anchor.setdefault(song_path, {})[instrument_key] = anchor_D
 
         for level_key, inst_entry in levels.items():
             if level_key not in selected_levels:
@@ -451,11 +442,15 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             rows_by_instrument[instrument_key].append(row)
             row_counts[instrument_key][level_key] += 1
 
-    # Band: one row per song, built from every instrument's anchor
+    # Band: one row per song, built from the instruments' Expert-anchored RemapDiff/CalcTier
     for song_path, song in cache['songs'].items():
         charted_instruments = song.get('instruments', {})
-        anchor = song_anchor.get(song_path, {})
-        row = _band_row(song['meta'], charted_instruments, anchor)
+        placements = {
+            instrument_key: diffs[song_path]
+            for instrument_key, diffs in difficulties_by_instrument.items()
+            if instrument_key != 'band' and song_path in diffs
+        }
+        row = _band_row(song['meta'], charted_instruments, placements)
         if row is None:
             continue
         rows_by_instrument['band'].append(row)

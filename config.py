@@ -79,7 +79,7 @@ DIFF_WRITE_OVERRIDES = {
     "drums":   "RemapDiff",    # override to the 0-6 remap instead
     "band":     None,          # skip - band song.ini left untouched
 
-    Vocals not in overrides means it will fall back to DIFF_WRITE_MODE
+    "vocals" not in overrides means it will fall back to DIFF_WRITE_MODE
 }
 
 '''

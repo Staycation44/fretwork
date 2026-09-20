@@ -138,9 +138,9 @@ def calc_drum_d(metrics, kick_mode='1x'):
 
 # RemapDiff/CalcTier anchored to the Expert level's D, off the 1x reading
 # A chart with no kicks at all still anchors (K = 0) - only a missing hand stream can't
-# Returns (RemapDiff, CalcTier, D) for band diff
+# Returns (RemapDiff, CalcTier)
 def anchor_remap_tier(expert_metrics):
     if expert_metrics is None or expert_metrics.get('hand') is None:
-        return None, None, None
+        return None, None
     expert_D = calc_drum_d(expert_metrics, '1x')['D']
-    return remap_diff(expert_D), calc_tier(expert_D), expert_D
+    return remap_diff(expert_D), calc_tier(expert_D)
