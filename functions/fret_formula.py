@@ -86,7 +86,7 @@ def remap_diff(D, instrument='guitar'):
     return None
 
 # log tier calculation
-def calc_tier(D, instrument='guitar'):
+def calc_tier(D):
     if D < BASE_D:
         return 0
     return int(math.floor(math.log(D / BASE_D) / LN_INC) + 1)
@@ -128,8 +128,9 @@ def calc_nvcov(metrics):
     }
 
 # RemapDiff/CalcTier anchored to the Expert level's D
+# Returns (RemapDiff, CalcTier)
 def anchor_remap_tier(expert_metrics, instrument='guitar'):
     if expert_metrics is None:
         return None, None
     expert_D = calc_nvcov(expert_metrics)['D']
-    return remap_diff(expert_D, instrument), calc_tier(expert_D, instrument)
+    return remap_diff(expert_D, instrument), calc_tier(expert_D)

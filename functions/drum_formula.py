@@ -38,6 +38,7 @@ RemapDiff (0-6 bins) and CalcTier (log-scaled) are drums-specific - see Methodol
 
 EMHX / RemapDiff & CalcTier anchor to expert, since only 1 diff value per instrument in song.ini
 Drums anchors to the 1x reading specifically - 2x is optional
+A chart with no kick notes scores with K = 0 and no kick CoV bonus
 
 Travel is a little overtuned, but works adeuqately
 """
@@ -136,8 +137,10 @@ def calc_drum_d(metrics, kick_mode='1x'):
     }
 
 # RemapDiff/CalcTier anchored to the Expert level's D, off the 1x reading
+# A chart with no kicks at all still anchors (K = 0) - only a missing hand stream can't
+# Returns (RemapDiff, CalcTier)
 def anchor_remap_tier(expert_metrics):
-    if expert_metrics is None or expert_metrics.get('hand') is None or expert_metrics.get('1x') is None:
+    if expert_metrics is None or expert_metrics.get('hand') is None:
         return None, None
     expert_D = calc_drum_d(expert_metrics, '1x')['D']
     return remap_diff(expert_D), calc_tier(expert_D)

@@ -38,8 +38,8 @@ guitar/coop/rhythm/bass/keys encoding
 
 ===DRUM===
 same section/event logic as 5 fret w/ different note numbers, split hands/kick streams
-    bits 1-5 are hand lanes (hand mask 0-4, supporting both 4 + 5 lane)
-    bit 0 is 1x kick, bit 32 is 2x kick (expert only)
+    notes 1-5 are hand lanes (hand mask bits 0-4, supporting both 4 + 5 lane)
+    note 0 is 1x kick (kick mask bit 0), note 32 is 2x kick (kick mask bit 1, expert only)
 
 NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
 
@@ -54,7 +54,8 @@ import numpy as np
 import tqdm
 
 from functions import instruments
-from parsers.timing import tempo_map, ticks_to_ms
+from parsers.text_decode import read_text
+from parsers.timing import clean_tempos, tempo_map, ticks_to_ms
 
 # ------------------------
 # Chart-specific constants
@@ -76,48 +77,52 @@ DRUM_ROLL_TYPE_TO_KIND = {65: 'single', 66: 'double'}
 # Raw section parsing (chart's [Section] / key = value text format)
 # ---------------------------------------------------------------------
 
+# decoded the same way as song.ini (utf-8 / utf-16 BOM / cp1252 fallback)
 def parse_chart(chart_source):
     c_dict = {}
     c_sect = None
 
-    with open(chart_source, encoding='utf-8-sig') as c_data:
-        for line in c_data:
-            line = line.strip()
+    for line in read_text(chart_source).splitlines():
+        line = line.strip()
 
-            if line.startswith('[') and line.endswith(']'):
-                c_sect = line[1:-1]
-                c_dict[c_sect] = {}
+        if line.startswith('[') and line.endswith(']'):
+            c_sect = line[1:-1]
+            c_dict[c_sect] = {}
 
-            elif ' = ' in line and c_sect is not None:
-                key, value = line.split(' = ', 1)
-                key = key.strip()
-                value = value.strip()
+        elif ' = ' in line and c_sect is not None:
+            key, value = line.split(' = ', 1)
+            key = key.strip()
+            value = value.strip()
 
-                if key in c_dict[c_sect]:
-                    if not isinstance(c_dict[c_sect][key], list):
-                        c_dict[c_sect][key] = [c_dict[c_sect][key]]
-                    c_dict[c_sect][key].append(value)
-                else:
-                    c_dict[c_sect][key] = value
+            if key in c_dict[c_sect]:
+                if not isinstance(c_dict[c_sect][key], list):
+                    c_dict[c_sect][key] = [c_dict[c_sect][key]]
+                c_dict[c_sect][key].append(value)
+            else:
+                c_dict[c_sect][key] = value
 
     # Global [Events] holds section names / lyrics - nothing used from this section
     c_dict.pop('Events', None)
     return c_dict
 
 # SyncTrack 'B <bpm*1000>' markers -> tempo arrays for tick -> ms conversion
+# Returns (tempo arrays, dropped) - dropped is [(tick, bpm)] for zero/invalid markers that were skipped
 def build_tempo_map(sync_track, tick_res):
     tempos = {}
+    dropped = []
     for tick, markers in sync_track.items():
         tick = int(tick)
         markers = markers if isinstance(markers, list) else [markers]
         for marker in markers:
             if marker.startswith('B'):
-                tempos[tick] = int(marker.split()[1]) / 1000
+                bpm = int(marker.split()[1]) / 1000
+                if bpm > 0:
+                    tempos[tick] = bpm
+                else:
+                    dropped.append((tick, bpm))
 
-    if not tempos:
-        tempos[0] = 120.0
-
-    return tempo_map(tempos, tick_res)
+    tempos, invalid = clean_tempos(tempos)
+    return tempo_map(tempos, tick_res), sorted(dropped + invalid)
 
 
 # ----------------------
@@ -250,7 +255,11 @@ def chart_notes(chart_source):
             raise ValueError(f"Missing required section '{required}' in {chart_source}")
 
     tick_res = int(c_dict['Song']['Resolution'])
-    tempo_arrs = build_tempo_map(c_dict['SyncTrack'], tick_res)
+    tempo_arrs, dropped_tempos = build_tempo_map(c_dict['SyncTrack'], tick_res)
+    warnings = [
+        (str(chart_source), 'InvalidTempo', f"skipped tempo marker at tick {tick} ({bpm} BPM)")
+        for tick, bpm in dropped_tempos
+    ]
 
     def to_ms_array(ticks):
         return ticks_to_ms(ticks, tick_res, *tempo_arrs)
@@ -297,6 +306,7 @@ def chart_notes(chart_source):
         'resolution': tick_res,
         'instruments': instruments_out,
         'roll_spans': roll_spans_out,
+        'warnings': warnings,  # popped into the build errors CSV by chart_loop
     }
 
 
@@ -320,11 +330,11 @@ def _resolve_workers(max_workers):
 
 
 # loops through path and reports errors for unparseable files
-def chart_loop(search_path, errors=None, max_workers=None):
+def chart_loop(search_path, errors=None, max_workers=None, files=None):
     chart_out = {}
 
-    search = pathlib.Path(search_path)
-    files = list(search.rglob("notes.chart"))
+    if files is None:
+        files = list(pathlib.Path(search_path).rglob("notes.chart"))
 
     if not files:
         return chart_out
@@ -336,6 +346,9 @@ def chart_loop(search_path, errors=None, max_workers=None):
         results = pool.map(_chart_notes_worker, files, chunksize=chunksize)
         for stream, error in tqdm.tqdm(results, total=len(files), desc="Parsing charts", unit="file"):
             if stream is not None:
+                warnings = stream.pop('warnings', [])
+                if errors is not None:
+                    errors.extend(warnings)
                 chart_out[stream['song_path']] = stream
             elif errors is not None:
                 errors.append(error)

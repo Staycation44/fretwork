@@ -99,8 +99,9 @@ def active_std(values, active_mask=None):
     return float(np.std(active)) if active.size else 0.0
 
 # provides NPS & VPS metrics to calculate D
-def calc_metrics(notes, window_ms=WINDOW_MS, step_ms=STEP_MS):
-    windows = window_arrays(notes, window_ms, step_ms)
+def calc_metrics(notes, window_ms=WINDOW_MS, step_ms=STEP_MS, windows=None):
+    if windows is None:
+        windows = window_arrays(notes, window_ms, step_ms)
     if windows is None:
         return None
 
