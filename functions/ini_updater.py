@@ -336,7 +336,7 @@ def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None
     if mode == "Restore":
         restored, unchanged, failed = restore_from_backup(header)
         print(f"Restored {restored} song.inis from backup" +
-              (f", {unchanged} unchanged" if unchanged else "") +
+              (f", {unchanged} unchanged (all instruments already original tag)" if unchanged else "") +
               (f", {len(failed)} failed" if failed else ""))
         return {"mode": mode, "restored": restored, "unchanged": unchanged, "failed": failed}
 
@@ -368,7 +368,7 @@ def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None
             failed.append((song_path, type(exc).__name__, str(exc)))
 
     print(f"Applied {mode} to {applied} song.inis [{instrument}]" +
-          (f", {unchanged} unchanged" if unchanged else "") +
+          (f", {unchanged} unchanged (already the written value)" if unchanged else "") +
           (f", {not_backed_up} not backed up (skipped)" if not_backed_up else "") +
           (f", {len(failed)} failed" if failed else ""))
     return {"mode": mode, "instrument": instrument, "applied": applied, "unchanged": unchanged,
