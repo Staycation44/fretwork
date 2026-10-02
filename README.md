@@ -3,6 +3,7 @@
 Fretwork is an analysis tool to calculate difficulty values for **Full Band (Guitar / Bass / Keys / Drums / Vocals)** from song files for **Guitar Hero / Rock Band / Clone Hero / YARG** using metrics derived directly from the charted notes (See Methodology.md for details)
 
 [Explainer video with some historical context](https://youtu.be/emoWMpDJ4ls)
+
 [Part 2 reviewing the 1.1 version](https://www.youtube.com/watch?v=3cfN8sTGJek)
 
 Libraries required: **pandas, numpy, tqdm, mido, matplotlib, and openpyxl** 
