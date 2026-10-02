@@ -6,8 +6,8 @@ HPS = Hands Per Second
     Drums differ from 5 fret here: guitar counts any simultaneous frets as 1 note, drums counts limbs
 
 TPS = Travel Per Second
-    Travel is the distance-weighted cost of the lanes turning ON since the previous hit
-    Additions only - a drum hit is discrete, there's no held lane to release
+    Travel is the count of lanes activated since the previous hit, additions only
+    Every newly struck lane counts 1 regardless of distance, so 4 and 5 lane kits score the same way
 
 KPS = Kicks Per Second
     Read twice per song - 1x (single pedal, bit 0) and 2x (double pedal, bits 0|1)
@@ -30,42 +30,15 @@ WINDOW_MS = fret_density.WINDOW_MS
 STEP_MS = fret_density.STEP_MS
 POPCOUNT = fret_density.POPCOUNT
 
-N_LANES = 5
-
 # roll span doesn't define exact lane identity so travel counts 0
 # density is capped at defined rate rather than the charted note rate
 # ESTIMATE, could be calibrated but fit is ok
 ROLL_CAP_HPS = 4.0
 
-# Travel distance compression to fix raw distance issues & 4 vs 5 lane scoring
-# 0.5 (sqrt) is fair fit, but still kinda arbitrary
-TRAVEL_GAMMA = 0.5
-
-
-# Distance lookup, [added_mask, prev_mask] -> travel cost
-# No prior lane is a pure addition
-def _build_travel_lookup(gamma=TRAVEL_GAMMA):
-    lut = np.zeros((256, 256), dtype=np.float64)
-    for added_byte in range(256):
-        added_bits = [b for b in range(N_LANES) if added_byte & (1 << b)]
-        if not added_bits:
-            continue
-        for prev_byte in range(256):
-            prev_bits = [b for b in range(N_LANES) if prev_byte & (1 << b)]
-            if not prev_bits:
-                lut[added_byte, prev_byte] = float(len(added_bits))
-                continue
-            dists = [min(abs(j - k) for k in prev_bits) for j in added_bits]
-            lut[added_byte, prev_byte] = float(np.mean([d ** gamma if d > 0 else 0.0 for d in dists]))
-    return lut
-
-
-TRAVEL_LOOKUP = _build_travel_lookup()
-
 
 # HPS/TPS source - per-hit weights off the hand stream's lane masks
 #   hits[i] = popcount(mask[i]) -> HPS
-#   travel[i] = distance-weighted lanes added -> TPS
+#   travel[i] = popcount(lanes added vs previous hit) -> TPS
 # first hit counts all its lanes as added
 def hand_var(hand_masks):
     masks = np.asarray(hand_masks, dtype=np.uint8)
@@ -78,7 +51,7 @@ def hand_var(hand_masks):
     travel[0] = float(POPCOUNT[masks[0]])
     if masks.size > 1:
         prev, curr = masks[:-1], masks[1:]
-        travel[1:] = TRAVEL_LOOKUP[curr & ~prev, prev]
+        travel[1:] = POPCOUNT[curr & ~prev]
 
     return hits, travel
 

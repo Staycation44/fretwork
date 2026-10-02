@@ -115,19 +115,19 @@ Drums share the same windowing idea as the 5 Fret instruments (a 1-second window
 
 **KPS (Kicks Per Second)** is a straight note rate (like NPS), computed separately for single (1x) and double (2x) kick pedal charting, with the same windows as HPS/TPS.
 
-**TPS (Travel Per Second)** is the VPS equivalent, but two things are different from 5 Fret. Only lanes newly struck count, as there is no release equivalent for drums. Second, lane position matters: a hand moving from the hi-hat to a far crash cymbal is a bigger physical reach than a hand moving to the adjacent snare, so each newly-struck lane is scored by its distance to the nearest lane already being hit. That raw distance is compressed by a square root so one big cross-kit reach doesn't dominate a passage of many small movements the way an uncompressed distance would.
+**TPS (Travel Per Second)** is the VPS equivalent, with one difference from 5 Fret: only lanes newly struck count, as there is no release equivalent for drums.
 
 >**Travel Examples** (lanes numbered 0-4 by chart lane: 0 red/snare, 1 yellow/hi-hat, 2 blue, 3 orange (5 lane) or green (4 lane), 4 green (5 lane)):
 >
 >Hat → Hat (lane 1 → 1) - same lane, nothing new struck, $t = 0$
 >
->Hat → Hat+Snare (lane 1 → {0,1}) - 1 new lane, distance 1, $t = 1^{0.5} = 1$
+>Hat → Hat+Snare (lane 1 → {0,1}) - 1 new lane, $t = 1$
 >
->Snare → 4 lane Green / Crash (lane 0 → 3) - 1 new lane, distance 3, $t = 3^{0.5} \approx 1.73$
+>Snare → Green / Crash (lane 0 → 3 or 4) - 1 new lane, $t = 1$
 >
->Snare → 5 lane Green (lane 0 → 4) - 1 new lane, distance 4, $t = 4^{0.5} = 2$
+>Hat+Snare → Blue+Green (lanes {0,1} → {2,3}) - 2 new lanes, $t = 2$
 >
->Silence → Hat+Snare - nothing struck immediately before, pure addition, $t = 2$ (no compression)
+>Silence → Hat+Snare - nothing struck immediately before, $t = 2$
 
 ## Drum Math
 
@@ -223,7 +223,7 @@ Authored talkie lengths are ignored so RB & GH style talkies can be treated equi
 
 ### PPS (Pitch-travel Per Second) <!-- omit in toc -->
 
-Vocal's VPS equivalent. Each sung note is compared to the previous sung pitch, and the interval (in semitones) is its travel value. Like drum travel, the raw interval is compressed by a square root so one big leap doesn't dominate a passage of many small steps, and is capped at an octave (12 semitones). Travel is tracked across octaves as charted - the games accept octave shifts, but most people will try to hit the notes as recorded. Slides and placeholders are included since the pitch still has to move. Talkies aren't pitched, so they're skipped, but they don't break the chain. Unlike 5 Fret/Drums, the first note of a song has nothing to compare against, so it scores 0 rather than a pure addition.
+Vocal's VPS equivalent. Each sung note is compared to the previous sung pitch, and the interval (in semitones) is its travel value. The raw interval is compressed by a square root so one big leap doesn't dominate a passage of many small steps. Unlike 5 Fret/Drums, the first note of a song has nothing to compare against, so it scores 0 rather than a pure addition.
 
 >**Pitch Travel Examples** (MIDI pitch, C4 = 60):
 >
@@ -245,7 +245,7 @@ Vocal's NPS equivalent - a straight rate of new syllables per window. A syllable
 
 ### Static Features <!-- omit in toc -->
 
-Two per-song values that aren't windowed, both from sung notes only. Used to build R (Register):
+Two per-song values that aren't windowed, both from sung notes only & used to build R (Register):
 - **Pitches** - count of distinct pitches used
 - **maxPitch** - highest sung pitch
 
@@ -257,7 +257,7 @@ $$
 D = (P \cdot R + S) \cdot CoV \cdot STAM
 $$
 
-Vocals is sort of a hybrid of lessons from 5 Fret & Drums due to the pure complexity of vocals charting. Official tiering conventions are incredibly messy (officials don't agree on nearly anything, even comparing DLC vs main setlist of the same game), so this is the loosest fit to official difficulty of any instrument.
+Vocals is sort of a hybrid of lessons from 5 Fret & Drums due to the differences in vocals charting. Official tiering conventions are incredibly messy (officials don't agree on nearly anything, even comparing DLC vs main setlist), so this is the loosest fit to official difficulty of any instrument.
 
 ### Epsilon terms <!-- omit in toc -->
 
@@ -318,7 +318,7 @@ $$
 D = \left(P \cdot \sqrt{\mathrm{Pitches}}\cdot\frac{\mathrm{maxPitch}}{60} + S\right) \cdot \left(1 + \sqrt{CV_P \cdot CV_S}\right) \cdot \left(\frac{\mathrm{Duration}}{230}\right)^{0.2}
 $$
 
-The only vocals-specific constant is middle C (MIDI 60) - everything else is shared with 5 Fret/Drums.
+The only vocals-specific constant is middle C (60) - everything else is shared with 5 Fret/Drums.
 
 ### What's missing <!-- omit in toc -->
 
@@ -375,13 +375,13 @@ Reference for the calibration tables behind `fret_formula.py`, `drum_formula.py`
 
 | Tier | D range        | Official | Remap |
 |------|----------------|---------:|------:|
-| 0    | (0, 10.3]      |    4.1%  |  4.9% |
-| 1    | (10.3, 12.3]   |    9.9%  |  9.0% |
-| 2    | (12.3, 14.0]   |   16.3%  | 15.9% |
-| 3    | (14.0, 16.2]   |   26.3%  | 27.2% |
-| 4    | (16.2, 19.2]   |   26.6%  | 26.6% |
-| 5    | (19.2, 22.8]   |   12.4%  | 12.1% |
-| 6    | (22.8, inf)    |    4.4%  |  4.4% |
+| 0    | (0, 9.8]       |    4.1%  |  4.2% |
+| 1    | (9.8, 12.1]    |    9.9%  | 10.0% |
+| 2    | (12.1, 13.6]   |   16.3%  | 16.4% |
+| 3    | (13.6, 15.6]   |   26.3%  | 25.9% |
+| 4    | (15.6, 18.5]   |   26.6%  | 26.8% |
+| 5    | (18.5, 21.8]   |   12.4%  | 12.4% |
+| 6    | (21.8, inf)    |    4.4%  |  4.3% |
 
 #### Vocals (`VOCAL_REMAP_BINS`) <!-- omit in toc -->
 
@@ -406,5 +406,5 @@ Refit for the updated formula (official, tagged charts only: n=2857).
 | Group  | BASE_D | LN_INC | D step per tier | Home |
 |--------|-------:|-------:|----------------:|----------|
 | G/B/K  |  7.101 | 0.1792 |            ~20% | `fret_formula.py` |
-| Drums  | 10.243 | 0.1602 |            ~17% | `drum_formula.py` |
+| Drums  | 10.115 | 0.1516 |            ~16% | `drum_formula.py` |
 | Vocals | 14.000 | 0.1898 |            ~21% | `vocal_formula.py` |
