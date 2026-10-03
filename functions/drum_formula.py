@@ -52,14 +52,14 @@ DIFF_LABELS = [0, 1, 2, 3, 4, 5, 6]
 
 # Bin edges calibrated so RemapDiff distribution roughly matches diff_drums' official distribution
 # Methodology.md has table data for these bins
-DRUM_REMAP_BINS = [0, 10.3, 12.3, 14, 16.2, 19.2, 22.8, math.inf]
+DRUM_REMAP_BINS = [0, 9.8, 12.1, 13.6, 15.6, 18.5, 21.8, math.inf]
 
 # --------------------------------------------
 # CalcTier (log-scaled) params
 # --------------------------------------------
 # ~One tier per LN_INC of log(D / BASE_D)
-BASE_D = 10.243
-LN_INC = 0.1602
+BASE_D = 10.115
+LN_INC = 0.1516
 
 
 # RB manual 0-6 fit

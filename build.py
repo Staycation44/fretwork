@@ -11,7 +11,7 @@ Existing backup rows are never overwritten - only their blank cells get filled f
 
 The library is walked once: 
  - song.ini / notes.chart / notes.mid combinations built out by the parsers 
-- .sng / .rb3con containers are unpacked in memory and reshaped to go into the cache
+ - .sng / rb3con containers are unpacked in memory and reshaped to go into the cache
 
 folders with a chart/mid but no song.ini plus unsupported .yargsong files are counted in the report
 
@@ -67,7 +67,7 @@ def scan_library(search_path):
                 mid_files.append(pathlib.Path(dirpath, name))
                 note_dirs.add(dirpath)
             elif rb3con_parser.is_rb3con_filename(name):
-                # these commonly ship with no extension
+                # name fast path - no file read needed
                 rb3con_files.append(pathlib.Path(dirpath, name))
             else:
                 ext = os.path.splitext(name)[1].lower()
@@ -75,6 +75,9 @@ def scan_library(search_path):
                     sng_files.append(pathlib.Path(dirpath, name))
                 elif ext in unsupported:
                     unsupported[ext] += 1
+                elif rb3con_parser.sniff_rb3con(os.path.join(dirpath, name), ext):
+                    # rb3con without a recognizable suffix, matched by STFS magic
+                    rb3con_files.append(pathlib.Path(dirpath, name))
 
     return {
         'ini': ini_files,
@@ -161,7 +164,7 @@ def build_cache(search_path=None, header=None, out_dir=None):
         search_path, errors, max_workers=config.PARSE_MAX_WORKERS, files=scan.get('sng'))
     ini_rows.update(sng_ini_rows)
 
-    # _rb3con packages carry their own metadata (songs.dta) + notes.mid
+    # rb3con packages carry their own metadata (songs.dta) + notes.mid
     rb3con_ini_rows, rb3con_note_streams = rb3con_parser.rb3con_loop(
         search_path, errors, max_workers=config.PARSE_MAX_WORKERS, files=scan.get('rb3con'))
     ini_rows.update(rb3con_ini_rows)
@@ -292,7 +295,7 @@ def build_cache(search_path=None, header=None, out_dir=None):
     if scan.get('sng'):
         print(f"    .sng count            {len(scan['sng'])}")
     if scan.get('rb3con'):
-        print(f"    _rb3con count         {len(scan['rb3con'])} ({len(rb3con_ini_rows)} songs)")
+        print(f"    rb3con count          {len(scan['rb3con'])} ({len(rb3con_ini_rows)} songs)")
     if scan['no_ini_folders']:
         print(f"    Chart/mid, no ini     {scan['no_ini_folders']}")
     for ext, count in scan['unsupported'].items():
