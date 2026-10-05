@@ -35,8 +35,22 @@ from parsers import dta, ini_parser, mid_parser
 
 STFS_MAGICS = (b'CON ', b'LIVE', b'PIRS')
 
-# rb3cons are commonly distributed with no file extension
+# Fast path by name - anything else is detected by its STFS magic (see sniff_rb3con)
 FILENAME_SUFFIXES = ('_rb3con', '.rb3con')
+
+# _Stfs reads this much header up front, so anything smaller can't be a valid package
+STFS_HEADER_SIZE = 0x971A
+
+# Never checked: covers the bulk of a typical library
+NON_CON_EXTS = frozenset({
+    '.ogg', '.opus', '.mp3', '.wav', '.flac', '.mogg',
+    '.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif',
+    '.mp4', '.webm', '.avi', '.mkv', '.mov',
+    '.ini', '.chart', '.mid', '.midi', '.txt', '.dta', '.json', '.xml',
+    '.sng', '.yargsong', '.zip', '.rar', '.7z', '.exe', '.dll',
+    # unpacked GH2 ARKs files
+    '.dtb', '.hdr', '.ark', '.vgs', '.voc', '.milo_ps2', '.bmp_ps2', '.png_ps2', '.fac', '.icn', '.ipu', '.dtx',
+})
 
 # RB3 rank->tier breakpoints
 RANK_DIFF_MAPS = {
@@ -57,12 +71,32 @@ RANK_KEY_TO_INSTRUMENT = {
 
 
 class Rb3ConError(ValueError):
-    """Raised for a malformed/unrecognized .rb3con package."""
+    """Raised for a malformed/unrecognized rb3con package."""
 
 
 def is_rb3con_filename(name):
     lname = name.lower()
     return any(lname.endswith(suffix) for suffix in FILENAME_SUFFIXES)
+
+
+# Content-based detection for packages without a recognizable suffix
+# (bare hex IDs, renamed files, .con/_con, etc)
+def sniff_rb3con(path, ext=None):
+    if ext is None:
+        ext = os.path.splitext(path)[1].lower()
+    if ext in NON_CON_EXTS:
+        return False
+    try:
+        if os.path.getsize(path) < STFS_HEADER_SIZE:
+            return False
+        with open(path, 'rb') as f:
+            return f.read(4) in STFS_MAGICS
+    except OSError:
+        return False
+
+
+def is_rb3con_file(path):
+    return is_rb3con_filename(os.path.basename(path)) or sniff_rb3con(path)
 
 
 # rank -> tier, on song.ini's 0-6 diff tag scale
@@ -263,7 +297,6 @@ def _difficulties_from_rank(song_entry):
     return diffs
 
 
-# One song within a container -> (meta_row, note_stream), matching ini_parser/mid_parser's own output shapes
 def _rb3con_song(stfs, song_id, song_entry, folder_path):
     song_path = f"{stfs.path}::{song_id}"
 
@@ -353,7 +386,7 @@ def rb3con_loop(search_path, errors=None, max_workers=None, files=None):
     note_index = {}
 
     if files is None:
-        files = [p for p in pathlib.Path(search_path).rglob("*") if p.is_file() and is_rb3con_filename(p.name)]
+        files = [p for p in pathlib.Path(search_path).rglob("*") if p.is_file() and is_rb3con_file(p)]
 
     if not files:
         return ini_rows, note_index
