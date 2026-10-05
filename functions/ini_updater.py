@@ -35,15 +35,24 @@ def song_ini_path(song_path):
     return pathlib.Path(song_path) / "song.ini"
 
 
-# Container songs have no song.ini to patch, so CalcTier/RemapDiff/Restore writes are skipped
 # .sng songs are keyed by the container file itself
+# there's no song.ini to patch, so CalcTier/RemapDiff/Restore writes are skipped
 CONTAINER_EXTS = ('.sng',)
 
-# rb3con songs are always keyed <package path>::<song_id> whatever the package is named
+# _rb3con packages commonly ship with no dotted extension at all
+_RB3CON_SUFFIXES = ('_rb3con', '.rb3con')
+
+# loose DTA packs are keyed "{songs.dta path}::{shortname}" - no song.ini to patch either
+_DTA_PACK_NAME = 'songs.dta'
+
 def is_container_song(song_path):
-    if '::' in song_path:
+    base = song_path.split('::', 1)[0]
+    if pathlib.Path(base).suffix.lower() in CONTAINER_EXTS:
         return True
-    return pathlib.Path(song_path).suffix.lower() in CONTAINER_EXTS
+    lname = pathlib.Path(base).name.lower()
+    if lname == _DTA_PACK_NAME and '::' in song_path:
+        return True
+    return any(lname.endswith(suffix) for suffix in _RB3CON_SUFFIXES)
 
 # ---------------------------------------------------------------------
 # ini read/write
@@ -292,7 +301,7 @@ def backup_data(songs, header):
 # Restores every song.ini for header back to its backed-up diff_* values
 # 'missing' cells remove the tag again, blank cells are left alone
 # Returns (restored_count, unchanged_count, container_count, failures)
-#   container_count - .sng/rb3con songs, backed up but never written (no song.ini to patch)
+#   container_count - .sng/rb3con/songs.dta songs, backed up but never written (no song.ini to patch)
 #   failures        - a song folder was moved, deleted, etc
 def restore_from_backup(header):
     backup_csv = backup_csv_path(header)

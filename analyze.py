@@ -25,7 +25,7 @@ Run with DIFF_WRITE_MODE options to write calculated difficulty to song.inis or 
     - Restore always restores every instrument - overrides are ignored (and 'Restore' isn't a valid override)
     - song.inis are written last, after the spreadsheet is saved, and only where the backup holds the original
     - unchanged values aren't rewritten
-    - .sng/rb3con files are not rewritten, so diff writeback is skipped for these (reported as 'skipped (container)')
+    - .sng/rb3con/songs.dta pack songs are not rewritten, so diff writeback is skipped for these (reported as 'skipped (container)')
 
 The cache's own header (stored by Build, or read from the cache filename) names the spreadsheet and
 picks the backup CSV - --cache accepts a full path or a bare filename from the caches folder

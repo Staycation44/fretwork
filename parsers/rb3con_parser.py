@@ -8,6 +8,7 @@ Only the .mid and songs.dta entries inside a song's folder are ever read
 .mogg (audio) is never opened & often encrypted
 
 DTA metadata (songs.dta) reference: https://rock-band-customs.gitlab.io/authoring-dtas.html
+DTA text parsing lives in parsers/dta.py (shared with dta_parser)
 
 One container can hold multiple songs
 each song folder under /songs/ is matched to its own entry in songs.dta by its internal song-id symbol
@@ -30,7 +31,7 @@ import struct
 import tqdm
 
 from functions import instruments
-from parsers import ini_parser, mid_parser
+from parsers import dta, ini_parser, mid_parser
 
 STFS_MAGICS = (b'CON ', b'LIVE', b'PIRS')
 
@@ -47,6 +48,8 @@ NON_CON_EXTS = frozenset({
     '.mp4', '.webm', '.avi', '.mkv', '.mov',
     '.ini', '.chart', '.mid', '.midi', '.txt', '.dta', '.json', '.xml',
     '.sng', '.yargsong', '.zip', '.rar', '.7z', '.exe', '.dll',
+    # unpacked GH2 ARKs files
+    '.dtb', '.hdr', '.ark', '.vgs', '.voc', '.milo_ps2', '.bmp_ps2', '.png_ps2', '.fac', '.icn', '.ipu', '.dtx',
 })
 
 # RB3 rank->tier breakpoints
@@ -68,7 +71,7 @@ RANK_KEY_TO_INSTRUMENT = {
 
 
 class Rb3ConError(ValueError):
-    """Raised for a malformed/unrecognized rb3con (STFS) package."""
+    """Raised for a malformed/unrecognized rb3con package."""
 
 
 def is_rb3con_filename(name):
@@ -78,7 +81,6 @@ def is_rb3con_filename(name):
 
 # Content-based detection for packages without a recognizable suffix
 # (bare hex IDs, renamed files, .con/_con, etc)
-# denylist rather than allowlist: extensionless names containing dots give splitext garbage "extensions"
 def sniff_rb3con(path, ext=None):
     if ext is None:
         ext = os.path.splitext(path)[1].lower()
@@ -272,82 +274,12 @@ class _Stfs:
         return self._read_chain(entry.firstblock, entry.size)
 
 
-# -----------------------------------
-# DTA parsing
-# -----------------------------------
-
-def _tokenize_dta(text):
-    tokens = []
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c.isspace():
-            i += 1
-        elif c == ';':
-            while i < n and text[i] not in '\r\n':
-                i += 1
-        elif c in '()':
-            tokens.append(c)
-            i += 1
-        elif c in '"\'':
-            j = text.find(c, i + 1)
-            j = n if j == -1 else j
-            tokens.append(text[i + 1:j])
-            i = j + 1
-        else:
-            j = i
-            while j < n and not text[j].isspace() and text[j] not in '();"\'':
-                j += 1
-            tokens.append(text[i:j])
-            i = j
-    return tokens
-
-
-def _parse_dta(text):
-    tokens = _tokenize_dta(text)
-    pos = [0]
-
-    def parse_expr():
-        if pos[0] >= len(tokens):
-            raise Rb3ConError("unexpected end of DTA data")
-        tok = tokens[pos[0]]
-        if tok == '(':
-            pos[0] += 1
-            items = []
-            while pos[0] < len(tokens) and tokens[pos[0]] != ')':
-                items.append(parse_expr())
-            if pos[0] >= len(tokens):
-                raise Rb3ConError("unbalanced parentheses in DTA data")
-            pos[0] += 1  # consume ')'
-            return items
-        pos[0] += 1
-        return tok
-
-    top = []
-    while pos[0] < len(tokens):
-        top.append(parse_expr())
-    return top
-
-
-# tree is a list of parsed items at one nesting level
-def _dta_find(tree, key):
-    for item in tree:
-        if isinstance(item, list) and item and isinstance(item[0], str) and item[0].lower() == key:
-            return item[1:]
-    return None
-
-
-def _dta_find_value(tree, key, default=None):
-    found = _dta_find(tree, key)
-    return found[0] if found else default
-
-
 # --------------------
 # Song-level parsing
 # --------------------
 
 def _difficulties_from_rank(song_entry):
-    rank_pairs = _dta_find(song_entry, 'rank') or []
+    rank_pairs = dta.find(song_entry, 'rank') or []
     diffs = {}
     for pair in rank_pairs:
         if not isinstance(pair, list) or len(pair) < 2:
@@ -365,32 +297,12 @@ def _difficulties_from_rank(song_entry):
     return diffs
 
 
-# One song within a container -> (meta_row, note_stream), matching ini_parser/mid_parser's own output shapes
-#   (encoding utf8)   -> re-decoded as utf-8
-#   (encoding latin1) -> kept as latin1
-#   undeclared        -> utf-8 if the bytes are valid utf-8 (some custom tools skip the tag), else latin1
-def _dta_string(song_entry, value):
-    if value is None:
-        return None
-    raw = value.encode('latin1')
-    declared = _dta_find_value(song_entry, 'encoding')
-    encoding = str(declared).strip().lower() if declared is not None else None
-    if encoding in ('utf8', 'utf-8'):
-        return raw.decode('utf-8', errors='replace')
-    if encoding is None:
-        try:
-            return raw.decode('utf-8')
-        except UnicodeDecodeError:
-            pass
-    return value
-
-
 def _rb3con_song(stfs, song_id, song_entry, folder_path):
     song_path = f"{stfs.path}::{song_id}"
 
     ini = _difficulties_from_rank(song_entry)
-    name = _dta_string(song_entry, _dta_find_value(song_entry, 'name'))
-    artist = _dta_string(song_entry, _dta_find_value(song_entry, 'artist'))
+    name = dta.decode_string(song_entry, dta.find_text(song_entry, 'name'))
+    artist = dta.decode_string(song_entry, dta.find_text(song_entry, 'artist'))
     if name:
         ini['name'] = name
     if artist:
@@ -422,7 +334,7 @@ def rb3con_songs(path):
         if dta_entry is None:
             raise Rb3ConError(f"{path}: no songs.dta found in package")
         dta_text = stfs.read_file(dta_entry).decode('latin1')
-        dta_songs = {entry[0]: entry for entry in _parse_dta(dta_text) if entry and isinstance(entry[0], str)}
+        dta_songs = {entry[0]: entry for entry in dta.song_entries(dta.parse(dta_text))}
 
         song_folders = {
             p[len('songs/'):].split('/', 1)[0]: f"songs/{p[len('songs/'):].split('/', 1)[0]}"
