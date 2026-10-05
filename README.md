@@ -51,7 +51,7 @@ ex. `Library_cache_08052026-0330.pkl`, `Library_metrics_08052026-0330.xlsx`.
 
 ## 2. Building a cache
 
-`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid` (now supports `.sng` & `rb3con` as well), reads them, and writes one cache file containing every song's note timing and metadata. A CSV containing per instrument original difficulties is also saved.
+`build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid` (now supports `.sng`, `rb3con`, and unpacked `ARKs` with associated `songs.dta` as well), reads them, and writes one cache file containing every song's note timing and metadata. A CSV containing per instrument original difficulties is also saved.
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
 
@@ -196,6 +196,7 @@ Fretwork's own code is MIT-licensed (see below), but a few pieces of format docu
 | [arkem/py360](https://github.com/arkem/py360) | STFS block-address math used in `rb3con_parser.py` adapted from py360's `stfs.py` | BSD | Copyright notice reproduced in `rb3con_parser.py` per the license's terms |
 | [mtolly/onyx](https://github.com/mtolly/onyx) | RB3 rank-to-tier values for `rb3con_parser.py` | GPL-3.0 | Threshold Reference |
 | [StackOverflow0x/RB3-Difficulty-Slider](https://github.com/StackOverflow0x/RB3-Difficulty-Slider) | RB3 rank-to-tier values for `rb3con_parser.py` | ??? | Threshold Reference |
+| [mariteaux GH2 modding tutorials](https://mariteaux.somnolescent.net/modding/guitar-hero/tutorials/adding-new-song-definitions/) | GH2 `songs.dta` layout and pack structure for `dta_parser.py` + tools to unpack `ARKs` and convert `songs.dtb` | ??? | Reference |
 
 ## License
 **MIT** - see LICENSE for details.
