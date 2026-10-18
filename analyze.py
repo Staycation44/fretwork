@@ -41,19 +41,21 @@ import pandas as pd
 import tqdm
 
 import config
-from functions import instruments, ini_updater, xlsx_format, timestamp
-from functions import cache as cache_mod
-from functions import fret_density, fret_formula
-from functions import drum_density, drum_formula
-from functions import vocal_density, vocal_formula
-from functions import band_formula
+from functions import (
+    anchors, band_formula, cache as cache_mod, drum_density, drum_formula, fret_density,
+    fret_formula, ini_updater, instruments, timestamp, vocal_density, vocal_formula, xlsx_format,
+)
 
 
-# shared row-metadata block - identical between the fret and drum row builders
-# drums get its own row shape after metadata
+#----------------
+# ROW BUILDERS
+#----------------
+
+# shared row-metadata block for fret/drum/vocal rows - each instrument's own row shape follows it
+# (vocals have no Level column, the sheet's column order drops it)
 def _row_meta(meta, instrument_key, level_key):
     return {
-        'Name': meta.get('Name'),
+        'Song Title': meta.get('Name'),
         'Artist': meta.get('Artist'),
         'Charter': meta.get('Charter'),
         'Type': instruments.TYPE_LABELS[instrument_key],
@@ -78,6 +80,7 @@ def _fret_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor
         **_row_meta(meta, instrument_key, level_key),
         **metrics,
         **nvcov,
+        'DurationS': int(metrics['DurationS']),
         'RemapDiff': anchor_remap,
         'CalcTier': anchor_tier,
     }
@@ -87,14 +90,15 @@ def _fret_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor
 NO_KICKS = {'pKPS': 0.0, 'aKPS': 0.0, 'medKPS': 0.0, 'stdKPS': 0.0}
 
 
-# One EMHX level's drum row: D_1x/D_2x live as sibling columns on one row
-# Returns None if there's no usable hand data at this level - a chart with no kicks
-# (e.g. RB-style Easy drums) still gets a row, scored with K = 0
+# one kick reading's (1x/2x) diagnostic columns, suffixed
 def _kick_reading_diag(reading, r, suffix):
     source = {**(reading or NO_KICKS), **r}
     return {f'{base}_{suffix}': source.get(base) for base in instruments.DRUM_KICK_DIAG_BASE}
 
 
+# One EMHX level's drum row: D_1x/D_2x live as sibling columns on one row
+# Returns None if there's no usable hand data at this level - a chart with no kicks
+# (e.g. RB-style Easy drums) still gets a row, scored with K = 0
 def _drum_row(code, meta, notes, instrument_key, level_key, anchor_remap, anchor_tier,
               roll_spans=None, metrics=None):
     if metrics is None:
@@ -149,13 +153,7 @@ def _vocal_row(code, meta, vocal_entry, metrics=None, d=None):
 
     return {
         'Code': code,
-        'Song Title': meta.get('Name'),
-        'Artist': meta.get('Artist'),
-        'Type': instruments.TYPE_LABELS['vocals'],
-        'Charter': meta.get('Charter'),
-        'Release': meta.get('Release'),
-        'Official': meta.get('Official'),
-        'Difficulty': (meta.get('Difficulty') or {}).get('vocals', '-1'),
+        **_row_meta(meta, 'vocals', 'expert'),
         **metrics,
         **d,
         'DurationS': int(metrics['DurationS']),
@@ -186,6 +184,57 @@ def _band_row(meta, charted_instruments, placements_by_instrument):
     }
 
 
+
+# Per-family setup for one (song, instrument): the Expert anchor + a row builder for each level
+# Each returns (RemapDiff, CalcTier, build_row) - build_row(code, level_key, level_entry) -> row or None
+# Expert's metrics are computed once here and reused for the Expert row
+def _fret_family(song, instrument_key, levels):
+    expert = levels.get('expert')
+    metrics, remap, tier = anchors.fret(expert['notes'] if expert else None, instrument_key)
+
+    def build_row(code, level_key, entry):
+        return _fret_row(code, song['meta'], entry['notes'], instrument_key, level_key, remap, tier,
+                         metrics=metrics if level_key == 'expert' else None)
+    return remap, tier, build_row
+
+
+def _drum_family(song, instrument_key, levels):
+    spans = song.get('roll_spans', {}).get('drums', {})
+    expert = levels.get('expert')
+    metrics, remap, tier = anchors.drum(expert['notes'] if expert else None, spans.get('expert', []))
+
+    def build_row(code, level_key, entry):
+        return _drum_row(code, song['meta'], entry['notes'], instrument_key, level_key, remap, tier,
+                         roll_spans=spans.get(level_key, []),
+                         metrics=metrics if level_key == 'expert' else None)
+    return remap, tier, build_row
+
+
+# vocals are Expert only - D, RemapDiff and CalcTier all come from the one entry
+def _vocal_family(song, instrument_key, levels):
+    expert = levels.get('expert')
+    metrics = d = None
+    if expert is not None:
+        metrics = vocal_density.calc_vocal_metrics(expert['notes'], expert['talkie'], expert['percussion'])
+        if metrics is not None:
+            d = vocal_formula.calc_vocal_d(metrics)
+    remap, tier = (d['RemapDiff'], d['CalcTier']) if d is not None else (None, None)
+
+    def build_row(code, level_key, entry):
+        is_expert = level_key == 'expert'
+        return _vocal_row(code, song['meta'], entry,
+                          metrics=metrics if is_expert else None, d=d if is_expert else None)
+    return remap, tier, build_row
+
+
+# anything not listed is 5 fret
+FAMILIES = {
+    'drums': _drum_family,
+    'vocals': _vocal_family,
+}
+
+
+
 # Save clock, since that's slower than most of the analysis...
 def _save_workbook(writer):
     start = time.time()
@@ -209,7 +258,7 @@ def _resolve_levels(spec):
 
 
 # ---------------------------
-# song.ini write-back planning
+# song.ini write-back modes and targets
 # ---------------------------
 WRITE_MODES = ("CalcTier", "RemapDiff")
 WRITE_TARGETS = [*instruments.INSTRUMENT_KEYS, 'band']
@@ -233,8 +282,7 @@ def _normalize_mode(value, where):
 # DIFF_WRITE_MODE + DIFF_WRITE_OVERRIDES -> (global mode, {instrument_key: write mode})
 # Raises before any work starts:
 #   unknown mode / instrument key, or 'Restore' as a per-instrument override
-# Restore ignores overrides (every instrument is restored), otherwise each instrument uses its
-# override if it has one - so overrides still write when the global mode is None
+# Restore ignores overrides (every instrument is restored)
 def _resolve_diff_plan(diff_mode, diff_overrides):
     mode = _normalize_mode(diff_mode, "DIFF_WRITE_MODE / --diff-mode")
 
@@ -259,7 +307,7 @@ def _resolve_diff_plan(diff_mode, diff_overrides):
     return mode, {key: m for key, m in plan.items() if m is not None}
 
 
-# an existing spreadsheet that's open in Excel can't be replaced - found out now, not after the analysis
+# error if the path exists and isn't writable (open in Excel)
 def _check_writable(path):
     path = pathlib.Path(path)
     if not path.exists():
@@ -268,7 +316,7 @@ def _check_writable(path):
         with open(path, 'ab'):
             pass
     except PermissionError:
-        raise PermissionError(f"Can't write {path} - close it in Excel (or whatever has it open) and rerun") from None
+        raise PermissionError(f"Can't write {path} - close the spreadsheet and rerun") from None
 
 
 # column order for a given sheet, with EXTRA_METRICS-gated hidden columns dropped
@@ -278,6 +326,9 @@ def _column_order_for(sheet_name):
         return profile.column_order
     return [c for c in profile.column_order if c not in profile.hidden_cols]
 
+#---------------------------
+# ANALYZE LOOP
+#---------------------------
 
 # run the analysis - loading from selected/default cache
 def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=None,
@@ -293,16 +344,13 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
     global_mode, write_plan = _resolve_diff_plan(diff_mode, diff_overrides)
 
     if global_mode == "Restore":
-        # Restore follows the same header rule as every other path: an explicit cache wins over
-        # config/--header. The pickle isn't loaded just for this - Build names the file
-        # {header}_cache_{ts} and stores that same header inside, so the filename is enough
+        # Restore follows the same header rule as every other path
         if cache is not None or cache_path is not None:
             if cache_path is not None:
                 cache_path = timestamp.resolve_cache_path(cache_path)
             header = cache_mod.resolve_header(cache or {}, cache_path, explicit_header, fallback=header)
         print(f"\nRestore mode - restoring {header} song.ini difficulties from backup (no spreadsheet this run)")
-        result = ini_updater.sync_difficulty("Restore", header)
-        return result
+        return ini_updater.sync_difficulty("Restore", header)
 
     if cache is None:
         if cache_path is not None:
@@ -327,18 +375,13 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             )
         backup_rows = ini_updater.load_backup_rows(header)
 
-    gen_on = cache.get('generated_at', 'unknown')
-
-    rows_by_instrument = {key: [] for key in instruments.INSTRUMENT_KEYS}
+    rows_by_instrument = {key: [] for key in WRITE_TARGETS}
+    difficulties_by_instrument = {key: {} for key in WRITE_TARGETS}
     row_counts = {
         key: {level: 0 for level in instruments.LEVEL_KEYS}
         for key in instruments.INSTRUMENT_KEYS
     }
-    difficulties_by_instrument = {key: {} for key in instruments.INSTRUMENT_KEYS}
-    rows_by_instrument['band'] = []
-    difficulties_by_instrument['band'] = {}
     total = 0
-    skipped = 0
 
     # one item per (song, instrument) - EMHX levels are handled inside the loop
     all_song_instruments = [
@@ -354,80 +397,8 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
         song = cache['songs'][song_path]
         codes_for_instrument = song.get('codes', {}).get(instrument_key, {})
 
-        if instrument_key == 'drums':
-            roll_spans_by_level = song.get('roll_spans', {}).get('drums', {})
-
-            expert_entry = levels.get('expert')
-            expert_metrics = None
-            if expert_entry is not None:
-                expert_roll_spans = roll_spans_by_level.get('expert', [])
-                expert_metrics = drum_density.calc_drum_metrics(expert_entry['notes'], roll_spans=expert_roll_spans)
-            anchor_remap, anchor_tier = drum_formula.anchor_remap_tier(expert_metrics)
-
-            if anchor_remap is not None:
-                difficulties_by_instrument[instrument_key][song_path] = {
-                    'RemapDiff': anchor_remap,
-                    'CalcTier': anchor_tier,
-                }
-
-            for level_key, inst_entry in levels.items():
-                if level_key not in selected_levels:
-                    continue
-                total += 1
-                code = codes_for_instrument.get(level_key)
-                roll_spans = roll_spans_by_level.get(level_key, [])
-
-                row = _drum_row(code, song['meta'], inst_entry['notes'], instrument_key, level_key,
-                                 anchor_remap, anchor_tier, roll_spans=roll_spans,
-                                 metrics=expert_metrics if level_key == 'expert' else None)
-                if row is None:
-                    skipped += 1
-                    continue
-
-                rows_by_instrument[instrument_key].append(row)
-                row_counts[instrument_key][level_key] += 1
-            continue
-
-        if instrument_key == 'vocals':
-            # vocals are Expert only - D, RemapDiff and CalcTier all come from the one entry
-            expert_entry = levels.get('expert')
-            vocal_metrics = vocal_d = None
-            if expert_entry is not None:
-                vocal_metrics = vocal_density.calc_vocal_metrics(
-                    expert_entry['notes'], expert_entry['talkie'], expert_entry['percussion']
-                )
-                if vocal_metrics is not None:
-                    vocal_d = vocal_formula.calc_vocal_d(vocal_metrics)
-
-            if vocal_d is not None:
-                difficulties_by_instrument[instrument_key][song_path] = {
-                    'RemapDiff': vocal_d['RemapDiff'],
-                    'CalcTier': vocal_d['CalcTier'],
-                }
-
-            for level_key, inst_entry in levels.items():
-                if level_key not in selected_levels:
-                    continue
-                total += 1
-                code = codes_for_instrument.get(level_key)
-
-                is_expert = level_key == 'expert'
-                row = _vocal_row(code, song['meta'], inst_entry,
-                                 metrics=vocal_metrics if is_expert else None,
-                                 d=vocal_d if is_expert else None)
-                if row is None:
-                    skipped += 1
-                    continue
-
-                rows_by_instrument[instrument_key].append(row)
-                row_counts[instrument_key][level_key] += 1
-            continue
-
-        # Expert's metrics are computed once here, they anchor RemapDiff/CalcTier
-        expert_entry = levels.get('expert')
-        expert_metrics = fret_density.calc_metrics(expert_entry['notes']) if expert_entry is not None else None
-        anchor_remap, anchor_tier = fret_formula.anchor_remap_tier(expert_metrics, instrument_key)
-
+        family = FAMILIES.get(instrument_key, _fret_family)
+        anchor_remap, anchor_tier, build_row = family(song, instrument_key, levels)
         if anchor_remap is not None:
             difficulties_by_instrument[instrument_key][song_path] = {
                 'RemapDiff': anchor_remap,
@@ -438,15 +409,9 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
             if level_key not in selected_levels:
                 continue
             total += 1
-            code = codes_for_instrument.get(level_key)
-
-            row = _fret_row(code, song['meta'], inst_entry['notes'], instrument_key,
-                             level_key, anchor_remap, anchor_tier,
-                             metrics=expert_metrics if level_key == 'expert' else None)
+            row = build_row(codes_for_instrument.get(level_key), level_key, inst_entry)
             if row is None:
-                skipped += 1
                 continue
-
             rows_by_instrument[instrument_key].append(row)
             row_counts[instrument_key][level_key] += 1
 
@@ -503,7 +468,7 @@ def analyze(cache=None, cache_path=None, header=None, out_dir=None, diff_mode=No
                 continue
             ini_updater.sync_difficulty(
                 instrument_mode, header, instrument=instrument_key,
-                songs=diffs.keys(), difficulties=diffs, backup_rows=backup_rows,
+                difficulties=diffs, backup_rows=backup_rows,
             )
     print()
 
@@ -522,7 +487,6 @@ def _write_workbook(xlsx_out, sheet_rows, total_rows, frames):
                 profile = instruments.SHEET_PROFILES[sheet_name]
 
                 df = pd.DataFrame(rows)
-                df = df.rename(columns={'Name': 'Song Title'})
 
                 # Difficulty comes from song.ini as a string, convert to numeric and fill missing with -1
                 df['Difficulty'] = pd.to_numeric(df['Difficulty'], errors='coerce').fillna(-1).astype(int)

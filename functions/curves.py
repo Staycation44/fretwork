@@ -19,7 +19,7 @@ import math
 
 import numpy as np
 
-from functions import fret_density, drum_density, vocal_density, vocal_formula
+from functions import drum_density, fret_density, vocal_density, vocal_formula, windowing
 
 # Shared smoothing time constant for curves
 TAU_MS = 2000.0
@@ -64,9 +64,13 @@ def _pad_to_length(arr, n):
 # 5 Fret curves
 # -------------
 
-# fret-only: builds raw rates from windows and assembles the final curve dict (incl. d_raw)
-def _calc_fret_curves(windows, window_ms, step_ms, tau_ms=TAU_MS):
+# final curves for render / 5 Fret
+def calc_curves(notes,
+                window_ms=fret_density.WINDOW_MS,
+                step_ms=fret_density.STEP_MS, tau_ms=TAU_MS, windows=None):
 
+    if windows is None:
+        windows = fret_density.window_arrays(notes, window_ms, step_ms)
     if windows is None or len(windows['time_ms']) == 0:
         return None
 
@@ -83,15 +87,6 @@ def _calc_fret_curves(windows, window_ms, step_ms, tau_ms=TAU_MS):
         'vps': smoothed['vps'],
         'd_raw': smoothed['nps'] + smoothed['vps'],
     }
-
-# final curves for render / 5 Fret
-def calc_curves(notes,
-                window_ms=fret_density.WINDOW_MS,
-                step_ms=fret_density.STEP_MS, tau_ms=TAU_MS, windows=None):
-
-    if windows is None:
-        windows = fret_density.window_arrays(notes, window_ms, step_ms)
-    return _calc_fret_curves(windows, window_ms, step_ms, tau_ms)
 
 # -----------
 # Drum curves
@@ -122,7 +117,7 @@ def calc_drum_curves(notes, roll_spans=None,
     n_2x = kicks_2x['time_ms'].size if kicks_2x is not None else 0
     n_max = max(n_hand, n_1x, n_2x)
 
-    grid = drum_density.make_grid(n_max, step_ms)
+    grid = windowing.make_grid(n_max, step_ms)
     window_s = window_ms / 1000.0
 
     raw_rates = {

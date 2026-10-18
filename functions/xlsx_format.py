@@ -8,16 +8,16 @@ Formatting:
     - Level (Easy/Medium/Hard/Expert) gets a fixed categorical fill
     - Raw diagnostic/formula-component columns are only present with EXTRA_METRICS = True
 
-Per-sheet-group formatting: 
+Per-sheet-group formatting:
 fret sheets (Guitar/Bass/Keys), Drums, Vocals and Band each have their own column set (instruments.SHEET_PROFILES)
 
 Fully data-driven off instruments.py, a few hardcoded things below (strictly formatting)
 """
 
 import pandas as pd
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, NamedStyle
 from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from functions import instruments
 

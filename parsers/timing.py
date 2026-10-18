@@ -6,8 +6,12 @@ Both formats have a similar tempo model - ticks with bpm stamps
     .mid has set_tempo meta messages
 outputs from both parsers are the same so these functions are shared
 
-clean_tempos() guards both formats so zero/invalid tempo markers are skipped 
+clean_tempos() guards both formats so zero/invalid tempo markers are skipped
 Errors are logged to the build errors CSV by the parsers and a missing tick-0 tempo is filled with 120 BPM
+
+converter() is the one entry point the parsers use: raw {tick: bpm} in, a tick -> ms function
+and the InvalidTempo warning rows out
+masks_to_stream() packs a {tick: lane mask} dict into the cache's {'time_ms', 'lanes'} stream shape
 """
 
 import math
@@ -60,3 +64,28 @@ def ticks_to_ms(tick_values, tick_res, ticks, cum, ms_per_beat):
     np.clip(idx, 0, None, out=idx)
 
     return cum[idx] + ((values - ticks[idx]) / tick_res) * ms_per_beat[idx]
+
+
+# raw {tick: bpm} (+ markers the parser already dropped) -> (to_ms_array, warning rows)
+# to_ms_array(ticks) converts a sorted tick list to ms with this file's tempo map
+def converter(tempos, tick_res, warn_label, dropped=()):
+    tempos, invalid = clean_tempos(tempos)
+    arrays = tempo_map(tempos, tick_res)
+    warnings = [
+        (warn_label, 'InvalidTempo', f"skipped tempo marker at tick {tick} ({bpm} BPM)")
+        for tick, bpm in sorted([*dropped, *invalid])
+    ]
+
+    def to_ms_array(tick_values):
+        return ticks_to_ms(tick_values, tick_res, *arrays)
+
+    return to_ms_array, warnings
+
+
+# {tick: lane mask} -> {'time_ms', 'lanes'} stream in tick order, empty arrays for an empty dict
+def masks_to_stream(masks_by_tick, to_ms_array):
+    ordered_ticks = sorted(masks_by_tick)
+    return {
+        'time_ms': to_ms_array(ordered_ticks),
+        'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
+    }

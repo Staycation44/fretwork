@@ -31,28 +31,25 @@ import pathlib
 import tqdm
 
 import config
-from functions import cache as cache_mod, drum_density, drum_formula, fret_density, fret_formula
-from functions import vocal_density, vocal_formula
-from functions import curves as curves_mod
-from functions import ini_updater, plot, timestamp
+from functions import (
+    anchors, cache as cache_mod, curves, drum_density, drum_formula, fret_density, fret_formula,
+    ini_updater, plot, timestamp, vocal_density, vocal_formula,
+)
 
 
 # One guitar/bass/keys entry - Expert metrics reused when this entry is the Expert level
 def _render_fret_entry(entry, out_dir, original_diffs):
     windows = fret_density.window_arrays(entry['notes'])
-    song_curves = curves_mod.calc_curves(entry['notes'], windows=windows)
+    song_curves = curves.calc_curves(entry['notes'], windows=windows)
     if song_curves is None:
         return None, f"{entry['code']}: no curve data"
 
     difficulty = None
     metrics = fret_density.calc_metrics(entry['notes'], windows=windows)
     if metrics is not None:
-        expert_notes = entry.get('expert_notes')
-        if entry['level'] == 'expert':
-            expert_metrics = metrics
-        else:
-            expert_metrics = fret_density.calc_metrics(expert_notes) if expert_notes is not None else None
-        anchor_remap, anchor_tier = fret_formula.anchor_remap_tier(expert_metrics, entry['instrument'])
+        _expert, anchor_remap, anchor_tier = anchors.fret(
+            entry.get('expert_notes'), entry['instrument'],
+            expert_metrics=metrics if entry['level'] == 'expert' else None)
 
         difficulty = {
             **fret_formula.calc_nvcov(metrics),
@@ -69,21 +66,16 @@ def _render_fret_entry(entry, out_dir, original_diffs):
 def _render_drum_entry(entry, out_dir, original_diffs):
     roll_spans = entry.get('roll_spans')
     windows = drum_density.window_arrays(entry['notes']['hand_mask'], roll_spans)
-    drum_curves = curves_mod.calc_drum_curves(entry['notes'], roll_spans=roll_spans, windows=windows)
+    drum_curves = curves.calc_drum_curves(entry['notes'], roll_spans=roll_spans, windows=windows)
     if drum_curves is None:
         return None, f"{entry['code']}: no curve data"
 
     difficulty = None
     metrics = drum_density.calc_drum_metrics(entry['notes'], roll_spans=roll_spans, windows=windows)
     if metrics is not None:
-        expert_notes = entry.get('expert_notes')
-        expert_roll_spans = entry.get('expert_roll_spans')
-        if entry['level'] == 'expert':
-            expert_metrics = metrics
-        else:
-            expert_metrics = (drum_density.calc_drum_metrics(expert_notes, roll_spans=expert_roll_spans)
-                              if expert_notes is not None else None)
-        anchor_remap, anchor_tier = drum_formula.anchor_remap_tier(expert_metrics)
+        _expert, anchor_remap, anchor_tier = anchors.drum(
+            entry.get('expert_notes'), entry.get('expert_roll_spans'),
+            expert_metrics=metrics if entry['level'] == 'expert' else None)
 
         difficulty = {
             'D_1x': drum_formula.calc_drum_d(metrics, '1x')['D'],
@@ -110,7 +102,7 @@ def _render_vocal_entry(entry, out_dir, original_diffs):
 
     metrics = vocal_density.calc_vocal_metrics(entry['notes'], talkie, percussion, windows=windows)
     difficulty = vocal_formula.calc_vocal_d(metrics)
-    vocal_curves = curves_mod.calc_vocal_curves(entry['notes'], talkie, percussion=percussion,
+    vocal_curves = curves.calc_vocal_curves(entry['notes'], talkie, percussion=percussion,
                                                 windows=windows, difficulty=difficulty)
 
     path = plot.render_vocal_song(entry, vocal_curves, difficulty,
@@ -155,7 +147,7 @@ def render_codes(codes, cache=None, cache_path=None, header=None, out_dir=None):
         print()
         return []
 
-    out_dir = pathlib.Path(out_dir) if out_dir else timestamp.project_path(config.RENDER_DIR)
+    out_dir = plot.resolve_out_dir(out_dir)
 
     # Original diffs from backup CSV for header
     # same value regardless of which EMHX level is being rendered (Expert derived)

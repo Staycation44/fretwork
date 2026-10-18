@@ -25,7 +25,7 @@ MID_PARSER - Parses notes.mid files into per-instrument, per-level note streams:
         }
 
 Scope: Easy/Medium/Hard/Expert (EMHX). 5-fret (Guitar/Co-op/Rhythm/Bass/Keys) + Drums + Vocals
-PART VOCALS is handed to vocal_parser._extract_vocal_track (Expert only, see vocal_parser)
+PART VOCALS is handed to vocal_parser.extract_vocal_track (Expert only, see vocal_parser)
 
 Tempo: zero/invalid set_tempo messages are skipped and logged to the build errors CSV,
 and 120 BPM is assumed before the first tempo marker (see timing.clean_tempos)
@@ -50,24 +50,17 @@ Hand lane N (4 or 5 lane) = base + n (1-5)
 Kick lane 1x base, kick lane 2x = base - 1 (expert only)
 """
 
-import concurrent.futures as cf
 import io
-import os
 import pathlib
 
 import mido
-import numpy as np
-import tqdm
 
-from functions import instruments, library_walk
-from parsers.timing import clean_tempos, tempo_map, ticks_to_ms
-from parsers.vocal_parser import _extract_vocal_track
+from functions import instruments
+from parsers import pool, timing, vocal_parser
 
 # ---------------------------------------------------------------------
 # Mid-specific constants
 # ---------------------------------------------------------------------
-OPEN_MID = 7  # internal bit position for an open note - format-agnostic, matches chart_parser
-
 # pitch -> (level_key, lane) for the four GRBYO blocks, built from instruments.py
 LANE_PITCH_TO_INFO = {
     base + lane: (level_key, lane)
@@ -100,25 +93,13 @@ DRUM_ROLL_PITCH_TO_KIND = {126: 'single', 127: 'double'}
 DRUM_ROLL_HARD_VELOCITY_RANGE = range(41, 51)  # 41-50 inclusive
 
 
-# ---------------------------------------------
-# EOF diagnostics - reporting for broken files
-# ---------------------------------------------
-# mido raises a blank EOFError() or OSError(), adding a little info, hopefully this helps someone torubleshoot
-# attempted some recovery of partial note streams from truncated files, but it didn't help much
-def _diagnose_eof(mid_source):
-    try:
-        size = pathlib.Path(mid_source).stat().st_size
-    except OSError as exc:
-        return f"couldn't stat file to report its size ({exc})"
-    return f"{size}-byte file"
-
-
 # ----------
 # Tempo map
 # ----------
 
-# Returns (tempo arrays, dropped)
-def map_mid_tempo(mid):
+# set_tempo messages across every track -> (raw {tick: bpm}, dropped [(tick, bpm)])
+# a zero tempo can't be converted to bpm, so it's dropped here - timing.converter drops the rest
+def _mid_tempos(mid):
     tempos = {}
     dropped = []
 
@@ -132,8 +113,7 @@ def map_mid_tempo(mid):
                 else:
                     dropped.append((abs_tick, 0.0))
 
-    tempos, invalid = clean_tempos(tempos)
-    return tempo_map(tempos, mid.ticks_per_beat), sorted(dropped + invalid)
+    return tempos, dropped
 
 
 # -----------------------
@@ -173,43 +153,19 @@ def _extract_track(track, instrument_key, to_ms_array):
     if allow_opens and enhanced_opens:
         for open_tick, level_key in pending_opens:
             level_masks = masks_by_tick[level_key]
-            level_masks[open_tick] = level_masks.get(open_tick, 0) | (1 << OPEN_MID)
+            level_masks[open_tick] = level_masks.get(open_tick, 0) | (1 << instruments.OPEN_BIT)
 
-    levels_out = {}
-    for level_key, level_masks in masks_by_tick.items():
-        if not level_masks:
-            continue
-
-        ordered_ticks = sorted(level_masks)
-        levels_out[level_key] = {
-            'notes': {
-                'time_ms': to_ms_array(ordered_ticks),
-                'lanes': np.array([level_masks[t] for t in ordered_ticks], dtype=np.uint8),
-            },
-        }
-
+    levels_out = {
+        level_key: {'notes': timing.masks_to_stream(level_masks, to_ms_array)}
+        for level_key, level_masks in masks_by_tick.items()
+        if level_masks
+    }
     return levels_out or None
-
 
 
 #---------------
 # DRUM STUFF
 #---------------
-
-# DRUM NOTES
-# One {tick: mask} dict -> a {'time_ms', 'lanes'} stream, empty arrays if the dict is empty
-def _drum_stream(masks_by_tick, to_ms_array):
-    if not masks_by_tick:
-        return {
-            'time_ms': np.empty(0, dtype=np.float64),
-            'lanes': np.empty(0, dtype=np.uint8),
-        }
-    ordered_ticks = sorted(masks_by_tick)
-    return {
-        'time_ms': to_ms_array(ordered_ticks),
-        'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
-    }
-
 
 # Drum equivalent of _extract_track, same scan with split to hands/kick
 def _extract_drum_track(track, to_ms_array):
@@ -246,8 +202,8 @@ def _extract_drum_track(track, to_ms_array):
             continue
         levels_out[level_key] = {
             'notes': {
-                'hand_mask': _drum_stream(hand_masks, to_ms_array),
-                'kick_mask': _drum_stream(kick_masks, to_ms_array),
+                'hand_mask': timing.masks_to_stream(hand_masks, to_ms_array),
+                'kick_mask': timing.masks_to_stream(kick_masks, to_ms_array),
             },
         }
 
@@ -294,20 +250,28 @@ def _extract_roll_spans(track, to_ms_array):
     return {level: sorted(spans) for level, spans in spans_by_level.items() if spans}
 
 
-# Core extraction over an already-open mido.MidiFile
-# shared by mid_notes() (notes.mid on disk) and mid_notes_from_bytes() (a midi embedded in a container)
-def _mid_notes_from_midifile(mid, song_path, warn_label=None):
+# notes.mid on disk -> note stream, song_path is the folder it sits in
+def mid_notes(mid_source):
+    song_path = str(pathlib.Path(mid_source).parent.resolve())
+    return mid_notes_from_bytes(pathlib.Path(mid_source).read_bytes(), song_path, warn_label=str(mid_source))
+
+
+# midi bytes -> note stream, shared by notes.mid on disk and midis embedded in containers
+# mido raises a blank EOFError()/OSError() on a truncated or corrupt file, so the size is added to help troubleshoot
+def mid_notes_from_bytes(data, song_path, warn_label=None):
     warn_label = warn_label if warn_label is not None else song_path
+    try:
+        mid = mido.MidiFile(file=io.BytesIO(data), clip=True)
+    except (EOFError, OSError) as exc:
+        if type(exc) not in (EOFError, OSError):
+            raise
+        raise type(exc)(
+            f"{len(data)}-byte file - corrupt or truncated midi ({type(exc).__name__} from mido)"
+        ) from exc
 
     tick_res = mid.ticks_per_beat
-    tempo_arrs, dropped_tempos = map_mid_tempo(mid)
-    warnings = [
-        (warn_label, 'InvalidTempo', f"skipped tempo marker at tick {tick} ({bpm} BPM)")
-        for tick, bpm in dropped_tempos
-    ]
-
-    def to_ms_array(ticks):
-        return ticks_to_ms(ticks, tick_res, *tempo_arrs)
+    tempos, dropped = _mid_tempos(mid)
+    to_ms_array, warnings = timing.converter(tempos, tick_res, warn_label, dropped)
 
     track_map = {t.name.strip(): t for t in mid.tracks if t.name}
 
@@ -325,7 +289,7 @@ def _mid_notes_from_midifile(mid, song_path, warn_label=None):
 
         levels = (
             _extract_drum_track(track, to_ms_array) if instrument_key == 'drums'
-            else _extract_vocal_track(track, to_ms_array) if instrument_key == 'vocals'
+            else vocal_parser.extract_vocal_track(track, to_ms_array) if instrument_key == 'vocals'
             else _extract_track(track, instrument_key, to_ms_array)
         )
         if levels is not None:
@@ -351,37 +315,6 @@ def _mid_notes_from_midifile(mid, song_path, warn_label=None):
     }
 
 
-def mid_notes(mid_source):
-    try:
-        mid = mido.MidiFile(str(mid_source), clip=True)
-    except (EOFError, OSError) as exc:
-        # these errors mean truncated/corrupted file
-        if type(exc) not in (EOFError, OSError):
-            raise
-        raise type(exc)(
-            f"{_diagnose_eof(mid_source)} - corrupt or truncated midi "
-            f"({type(exc).__name__} from mido)"
-        ) from exc
-
-    song_path = str(pathlib.Path(mid_source).parent.resolve())
-    return _mid_notes_from_midifile(mid, song_path, warn_label=str(mid_source))
-
-
-# Same as mid_notes(), for midi bytes already extracted from a container
-def mid_notes_from_bytes(data, song_path, warn_label=None):
-    try:
-        mid = mido.MidiFile(file=io.BytesIO(data), clip=True)
-    except (EOFError, OSError) as exc:
-        if type(exc) not in (EOFError, OSError):
-            raise
-        raise type(exc)(
-            f"{len(data)}-byte embedded midi - corrupt or truncated "
-            f"({type(exc).__name__} from mido)"
-        ) from exc
-
-    return _mid_notes_from_midifile(mid, song_path, warn_label=warn_label)
-
-
 # -----------
 # Search loop - parallel (should've done this so long ago!)
 # -----------
@@ -391,39 +324,10 @@ def _mid_notes_worker(file):
     try:
         return mid_notes(file), None
     except Exception as exc:
-        message = str(exc) or repr(exc)
-        return None, (str(file), type(exc).__name__, message)
+        return None, pool.error_row(file, exc)
 
 
-# max_workers=None -> leave one core free (uncapped maxes out CPU lol)
-def _resolve_workers(max_workers):
-    if max_workers is not None:
-        return max(1, int(max_workers))
-    return max(1, (os.cpu_count() or 1) - 1)
-
-
-# loops through search path, retrieving errors to provide along with cache
-def mid_loop(search_path, errors=None, max_workers=None, files=None):
-    mid_out = {}
-
-    if files is None:
-        files = list(library_walk.library_files(search_path, library_walk.name_is("notes.mid")))
-
-    if not files:
-        return mid_out
-
-    workers = _resolve_workers(max_workers)
-    chunksize = max(1, len(files) // (workers * 4))
-
-    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(_mid_notes_worker, files, chunksize=chunksize)
-        for stream, error in tqdm.tqdm(results, total=len(files), desc="Parsing midis", unit="file"):
-            if stream is not None:
-                warnings = stream.pop('warnings', [])
-                if errors is not None:
-                    errors.extend(warnings)
-                mid_out[stream['song_path']] = stream
-            elif errors is not None:
-                errors.append(error)
-
-    return mid_out
+# notes.mid files (from build.scan_library) -> {song_path: stream}, errors appended to errors
+def mid_loop(files, errors=None, max_workers=None):
+    results = pool.run_parallel(_mid_notes_worker, files, "Parsing midis", "file", max_workers)
+    return pool.collect_streams(results, errors)

@@ -15,23 +15,17 @@ each song folder under /songs/ is matched to its own entry in songs.dta by its i
 song_path for each is f"{container path}::{song_id}" since there's no per-song file to key against
 A song that fails inside a multi-song pack is logged on its own, the rest should still load
 
-DIFFICULTY: DTA rank values are RB3's own internal difficulty scores
-RANK_DIFF_MAPS (to bring them back into 0-6 range) was checked against the above dta gitlab,
-https://github.com/mtolly/onyx and https://github.com/StackOverflow0x/RB3-Difficulty-Slider
+DIFFICULTY: DTA rank values -> 0-6 tiers live in parsers/dta.py (RANK_DIFF_MAPS, shared with dta_parser)
 
 this module does no note-level work itself, just hands data to the parsers
 RB3's core-instrument MIDI track names match what mid_parser expects unchanged
 """
 
-import concurrent.futures as cf
 import os
 import pathlib
 import struct
 
-import tqdm
-
-from functions import instruments, library_walk
-from parsers import dta, ini_parser, mid_parser
+from parsers import dta, ini_parser, mid_parser, pool
 
 STFS_MAGICS = (b'CON ', b'LIVE', b'PIRS')
 
@@ -51,24 +45,6 @@ NON_CON_EXTS = frozenset({
     # unpacked GH2 ARKs files
     '.dtb', '.hdr', '.ark', '.vgs', '.voc', '.milo_ps2', '.bmp_ps2', '.png_ps2', '.fac', '.icn', '.ipu', '.dtx',
 })
-
-# RB3 rank->tier breakpoints
-RANK_DIFF_MAPS = {
-    'drums':  [124, 151, 178, 242, 345, 448],
-    'vocals': [132, 175, 218, 279, 353, 427],
-    'bass':   [135, 181, 228, 293, 364, 436],
-    'guitar': [139, 176, 221, 267, 333, 409],
-    'keys':   [153, 211, 269, 327, 385, 443],
-    'band':   [163, 215, 243, 267, 292, 345],
-}
-
-# DTA rank block key -> Fretwork instrument key
-# pro/real insts OOS
-RANK_KEY_TO_INSTRUMENT = {
-    'drum': 'drums', 'guitar': 'guitar', 'bass': 'bass',
-    'vocals': 'vocals', 'keys': 'keys', 'band': 'band',
-}
-
 
 class Rb3ConError(ValueError):
     """Raised for a malformed/unrecognized rb3con package."""
@@ -93,20 +69,6 @@ def sniff_rb3con(path, ext=None):
             return f.read(4) in STFS_MAGICS
     except OSError:
         return False
-
-
-def is_rb3con_file(path):
-    return is_rb3con_filename(os.path.basename(path)) or sniff_rb3con(path)
-
-
-# rank -> tier, on song.ini's 0-6 diff tag scale
-def _rank_to_tier(diff_map, rank):
-    tier = 0
-    for threshold in (1, *diff_map):
-        if threshold > rank:
-            break
-        tier += 1
-    return tier - 1 if tier else 0
 
 
 # ------------------------
@@ -278,36 +240,10 @@ class _Stfs:
 # Song-level parsing
 # --------------------
 
-def _difficulties_from_rank(song_entry):
-    rank_pairs = dta.find(song_entry, 'rank') or []
-    diffs = {}
-    for pair in rank_pairs:
-        if not isinstance(pair, list) or len(pair) < 2:
-            continue
-        rank_key = str(pair[0]).lower()
-        instrument_key = RANK_KEY_TO_INSTRUMENT.get(rank_key)
-        if instrument_key is None:
-            continue
-        try:
-            rank = int(float(pair[1]))
-        except (TypeError, ValueError):
-            continue
-        diff_map = RANK_DIFF_MAPS[instrument_key]
-        diffs[instruments.DIFF_TAGS[instrument_key]] = str(_rank_to_tier(diff_map, rank))
-    return diffs
-
-
 def _rb3con_song(stfs, song_id, song_entry, folder_path):
     song_path = f"{stfs.path}::{song_id}"
 
-    ini = _difficulties_from_rank(song_entry)
-    name = dta.decode_string(song_entry, dta.find_text(song_entry, 'name'))
-    artist = dta.decode_string(song_entry, dta.find_text(song_entry, 'artist'))
-    if name:
-        ini['name'] = name
-    if artist:
-        ini['artist'] = artist
-    meta_row = ini_parser.ini_metadata_from_pairs(ini, song_path)
+    meta_row = ini_parser.ini_metadata_from_pairs(dta.song_pairs(song_entry), song_path)
 
     mid_entry = next(
         (e for path, e in stfs.paths.items()
@@ -354,7 +290,7 @@ def rb3con_songs(path):
                 results.append(_rb3con_song(stfs, song_id, song_entry, folder_path))
             except Exception as exc:
                 # one broken song doesn't remove the pack
-                song_errors.append((f"{path}::{song_id}", type(exc).__name__, str(exc) or repr(exc)))
+                song_errors.append(pool.error_row(f"{path}::{song_id}", exc))
 
         if not matched:
             raise Rb3ConError(f"{path}: no song folders matched an entry in songs.dta")
@@ -371,44 +307,10 @@ def _rb3con_worker(file):
     try:
         return rb3con_songs(file), None
     except Exception as exc:
-        return None, (str(file), type(exc).__name__, str(exc) or repr(exc))
+        return None, pool.error_row(file, exc)
 
 
-def _resolve_workers(max_workers):
-    if max_workers is not None:
-        return max(1, int(max_workers))
-    return max(1, (os.cpu_count() or 1) - 1)
-
-
-# Returns (ini_rows, note_index): dicts keyed by song_path for build.py
-def rb3con_loop(search_path, errors=None, max_workers=None, files=None):
-    ini_rows = {}
-    note_index = {}
-
-    if files is None:
-        files = [p for p in library_walk.library_files(search_path, lambda name: True) if is_rb3con_file(p)]
-
-    if not files:
-        return ini_rows, note_index
-
-    workers = _resolve_workers(max_workers)
-    chunksize = max(1, len(files) // (workers * 4))
-
-    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(_rb3con_worker, files, chunksize=chunksize)
-        for result, error in tqdm.tqdm(results, total=len(files), desc="Parsing rb3con", unit="file"):
-            if result is not None:
-                songs, song_errors = result
-                if errors is not None:
-                    errors.extend(song_errors)
-                for meta_row, note_stream in songs:
-                    warnings = note_stream.pop('warnings', [])
-                    if errors is not None:
-                        errors.extend(warnings)
-                    song_path = meta_row['SongPath']
-                    ini_rows[song_path] = meta_row
-                    note_index[song_path] = note_stream
-            elif errors is not None:
-                errors.append(error)
-
-    return ini_rows, note_index
+# rb3con packages -> (ini_rows, note_index): dicts keyed by song_path for build.py
+def rb3con_loop(files, errors=None, max_workers=None):
+    results = pool.run_parallel(_rb3con_worker, files, "Parsing rb3con", "file", max_workers)
+    return pool.collect_songs(results, errors)

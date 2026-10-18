@@ -26,32 +26,27 @@ def walk_library(search_path):
         yield dirpath, dirnames, filenames
 
 
-# every file under search_path whose name passes match(name), as pathlib.Path
-def library_files(search_path, match):
-    for dirpath, _dirnames, filenames in walk_library(search_path):
-        for name in filenames:
-            if match(name):
-                yield pathlib.Path(dirpath, name)
+def find_ci(root, rel, want_dir=False):
+    cur = pathlib.Path(root)
+    for part in pathlib.PurePosixPath(str(rel).replace('\\', '/')).parts:
+        if part in ('', '.'):
+            continue
+        candidate = cur / part
+        if not candidate.exists():
+            candidate = _entry_ci(cur, part)
+            if candidate is None:
+                return None
+        cur = candidate
+    found = cur.is_dir() if want_dir else cur.is_file()
+    return cur if found else None
 
 
-def name_is(filename):
-    wanted = filename.lower()
-    return lambda name: name.lower() == wanted
-
-def ext_in(exts):
-    wanted = tuple(ext.lower() for ext in exts)
-    return lambda name: os.path.splitext(name)[1].lower() in wanted
-
-def find_in_folder(folder, filename):
-    folder = pathlib.Path(folder)
-    exact = folder / filename
-    if exact.is_file():
-        return exact
-    wanted = filename.lower()
+def _entry_ci(folder, name):
+    wanted = name.lower()
     try:
         for entry in os.scandir(folder):
-            if entry.name.lower() == wanted and entry.is_file():
-                return folder / entry.name
+            if entry.name.lower() == wanted:
+                return pathlib.Path(folder, entry.name)
     except OSError:
         pass
     return None

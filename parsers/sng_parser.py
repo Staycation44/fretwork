@@ -1,5 +1,5 @@
 """
-SNG_PARSER - Reads .sng container files into the same metadata-row / note-stream shapes build.py expects
+SNG_PARSER - Reads .sng container files into the same metadata-row / note-stream shapes for build.py
 
 .yargsong is intentionally not implemented
 
@@ -11,20 +11,14 @@ there's no midi or it fails to parse (same rule build.py applies to song folders
 .SNG spec: https://github.com/mdsitton/SngFileFormat
 """
 
-import concurrent.futures as cf
-import os
 import pathlib
 import struct
 
 import numpy as np
-import tqdm
 
-from functions import library_walk
-from parsers import chart_parser, ini_parser, mid_parser
-from parsers.text_decode import decode_text
+from parsers import chart_parser, ini_parser, mid_parser, pool, text_decode
 
 MAGIC = b'SNGPKG'
-SNG_EXTENSIONS = ('.sng',)
 
 # the only embedded files this tool ever needs - everything else in the container is skipped
 WANTED_FILES = {'notes.mid', 'notes.chart'}
@@ -176,13 +170,13 @@ def sng_song(path):
                 raise
             mid_exc = exc
             # midi error logged, then fall through to the chart
-            warnings.append((f"{path}!notes.mid", type(exc).__name__, str(exc) or repr(exc)))
+            warnings.append(pool.error_row(f"{path}!notes.mid", exc))
             warnings.append((f"{path}!notes.chart", 'ChartFallback',
                              "notes.mid failed to parse - using notes.chart instead"))
 
     if note_stream is None:
         try:
-            chart_text = decode_text(files['notes.chart'])
+            chart_text = text_decode.decode_text(files['notes.chart'])
             note_stream = chart_parser.chart_notes_from_text(
                 chart_text, song_path, warn_label=f"{path}!notes.chart")
         except Exception as exc:
@@ -203,45 +197,15 @@ def sng_song(path):
 # Search loop - parallel, same shape as mid_loop/chart_loop
 # -----------
 
+# one container is one song - shaped like rb3con/dta's (songs, song_errors) so collection is shared
 def _sng_song_worker(file):
     try:
-        return sng_song(file), None
+        return ([sng_song(file)], []), None
     except Exception as exc:
-        return None, (str(file), type(exc).__name__, str(exc) or repr(exc))
+        return None, pool.error_row(file, exc)
 
 
-def _resolve_workers(max_workers):
-    if max_workers is not None:
-        return max(1, int(max_workers))
-    return max(1, (os.cpu_count() or 1) - 1)
-
-
-# Returns (ini_rows, note_index): dicts keyed by song_path for build.py
-def sng_loop(search_path, errors=None, max_workers=None, files=None):
-    ini_rows = {}
-    note_index = {}
-
-    if files is None:
-        files = list(library_walk.library_files(search_path, library_walk.ext_in(SNG_EXTENSIONS)))
-
-    if not files:
-        return ini_rows, note_index
-
-    workers = _resolve_workers(max_workers)
-    chunksize = max(1, len(files) // (workers * 4))
-
-    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(_sng_song_worker, files, chunksize=chunksize)
-        for result, error in tqdm.tqdm(results, total=len(files), desc="Parsing sng", unit="file"):
-            if result is not None:
-                meta_row, note_stream = result
-                warnings = note_stream.pop('warnings', [])
-                if errors is not None:
-                    errors.extend(warnings)
-                song_path = meta_row['SongPath']
-                ini_rows[song_path] = meta_row
-                note_index[song_path] = note_stream
-            elif errors is not None:
-                errors.append(error)
-
-    return ini_rows, note_index
+# .sng files -> (ini_rows, note_index): dicts keyed by song_path for build.py
+def sng_loop(files, errors=None, max_workers=None):
+    results = pool.run_parallel(_sng_song_worker, files, "Parsing sng", "file", max_workers)
+    return pool.collect_songs(results, errors)

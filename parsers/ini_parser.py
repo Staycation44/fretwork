@@ -11,8 +11,8 @@ import re
 
 import tqdm
 
-from functions import instruments, library_walk
-from parsers.text_decode import read_text
+from functions import instruments
+from parsers import pool, text_decode
 
 # --------------
 # Source tables
@@ -60,12 +60,12 @@ DETAG = re.compile(r"<.*?>")
 # Parsing
 # --------
 
-# key = value parse, same as chart_parser.parse_chart
-# not configparser - it chokes on % and line breaks in loading_phrase
+# key = value parse
+# configparser chokes on % and line breaks in loading_phrase so was removed
 # [section] lines skipped (only ever [song]), keys lowercased, last dupe wins
 def parse_ini(file):
     ini = {}
-    for line in read_text(file).splitlines():
+    for line in text_decode.read_text(file).splitlines():
         line = line.strip()
         if not line or line[0] in ';#[':
             continue
@@ -123,20 +123,15 @@ def ini_metadata(file):
 # Search loop
 # -----------
 
-# loops through search_path and provides errors to output along with cache
-# Returns {song_path: metadata row}
-def ini_loop(search_path, errors=None, files=None):
+# song.ini files -> {song_path: metadata row}, errors appended to errors
+def ini_loop(files, errors=None):
     ini_out = {}
-    if files is None:
-        files = list(library_walk.library_files(search_path, library_walk.name_is("song.ini")))
-
     for file in tqdm.tqdm(files, desc="Gathering ini data", unit="file"):
         try:
             row = ini_metadata(file)
             ini_out[row['SongPath']] = row
         except Exception as exc:
             if errors is not None:
-                errors.append((str(file), type(exc).__name__, str(exc) or repr(exc)))
-            continue
+                errors.append(pool.error_row(file, exc))
 
     return ini_out
