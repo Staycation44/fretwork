@@ -31,10 +31,8 @@ import pathlib
 import tqdm
 
 import config
-from functions import (
-    anchors, cache as cache_mod, curves, drum_density, drum_formula, fret_density, fret_formula,
-    ini_updater, plot, timestamp, vocal_density, vocal_formula,
-)
+from formulas import drum_density, drum_formula, fret_density, fret_formula, vocal_density, vocal_formula
+from functions import anchors, cache as cache_mod, curves, ini_updater, plot, timestamp
 
 
 # One guitar/bass/keys entry - Expert metrics reused when this entry is the Expert level

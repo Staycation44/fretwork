@@ -41,10 +41,8 @@ import pandas as pd
 import tqdm
 
 import config
-from functions import (
-    anchors, band_formula, cache as cache_mod, drum_density, drum_formula, fret_density,
-    fret_formula, ini_updater, instruments, timestamp, vocal_density, vocal_formula, xlsx_format,
-)
+from formulas import band_formula, drum_density, drum_formula, fret_density, fret_formula, vocal_density, vocal_formula
+from functions import anchors, cache as cache_mod, ini_updater, instruments, timestamp, xlsx_format
 
 
 #----------------

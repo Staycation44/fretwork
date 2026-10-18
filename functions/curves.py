@@ -19,7 +19,8 @@ import math
 
 import numpy as np
 
-from functions import drum_density, fret_density, vocal_density, vocal_formula, windowing
+from formulas import drum_density, fret_density, vocal_density, vocal_formula
+from functions import windowing
 
 # Shared smoothing time constant for curves
 TAU_MS = 2000.0

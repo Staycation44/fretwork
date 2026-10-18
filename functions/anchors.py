@@ -8,7 +8,7 @@ already has them (render at the Expert level) to skip the recompute
 Vocals have no EMHX, so their RemapDiff/CalcTier come straight from their own D (vocal_formula)
 """
 
-from functions import drum_density, drum_formula, fret_density, fret_formula
+from formulas import drum_density, drum_formula, fret_density, fret_formula
 
 
 # guitar/coop/rhythm/bass/keys - calibration group picked by instrument_key
