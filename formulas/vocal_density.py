@@ -10,7 +10,7 @@ PPS = Pitch-travel Per Second
     Talkies aren't pitched and don't break the chain
 
 SPS = Syllables Per Second
-    Sung notes that aren't slides (+) or placeholders (+$) plus talkies (RB convention (*/^/#), or GH-style lyric-only) 
+    Sung notes that aren't slides (+) or placeholders (+$) plus talkies (RB convention (*/^/#), or GH-style lyric-only)
     Sung notes + talkies also defines NoteCount
 
 aPPS & aSPS = total / DurationS
@@ -36,14 +36,16 @@ Percussion is render/duration only (essentially treated as rest time)
 Charts with zero syllables return None
 
 Grid start is t=0 and runs until the latest endpoint across all three streams
+
+Window/grid/summary mechanics are shared with 5 fret & drums in windowing.py
 """
 
 import numpy as np
 
-from functions import fret_density
+from functions import windowing
 
-WINDOW_MS = fret_density.WINDOW_MS
-STEP_MS = fret_density.STEP_MS
+WINDOW_MS = windowing.WINDOW_MS
+STEP_MS = windowing.STEP_MS
 
 # Pitch travel constants
 PITCH_CAP = 12      # octave of semitones
@@ -51,16 +53,6 @@ PITCH_GAMMA = 0.5   # sqrt compression
 
 # fixed talkie length (estimated from official data), clipped to the next onset
 TALKIE_FILL_MS = 133.0
-
-
-def _sorted_stream(stream, keys):
-    times = np.asarray(stream['time_ms'], dtype=np.float64)
-    arrays = {k: np.asarray(stream[k]) for k in keys}
-    if times.size > 1 and not np.all(np.diff(times) >= 0):
-        order = np.argsort(times, kind='stable')
-        times = times[order]
-        arrays = {k: v[order] for k, v in arrays.items()}
-    return times, arrays
 
 
 # PPS, capped/compressed interval from previous pitch
@@ -85,14 +77,6 @@ def talkie_ends(talkie_times, sung_times, fill_ms=TALKIE_FILL_MS):
     return talkie_times + np.minimum(gap, fill_ms)
 
 
-# windowed sum of per-event values over the grid
-def _window_sum(times, values, grid, window_ms=WINDOW_MS):
-    prefix = np.concatenate(([0.0], np.cumsum(values)))
-    left = np.searchsorted(times, grid, side='left')
-    right = np.searchsorted(times, grid + window_ms, side='left')
-    return prefix[right] - prefix[left]
-
-
 # Windowing pass across SPS/PPS + the onset gates
 # zero activity windows are included
 #     Returns:
@@ -111,18 +95,19 @@ def _window_sum(times, values, grid, window_ms=WINDOW_MS):
 #            'has_percussion':   bool,     # true = draw perc line (render only)
 #        }
 def window_arrays(notes, talkie, percussion=None, window_ms=WINDOW_MS, step_ms=STEP_MS):
-    sung_t, sung = _sorted_stream(notes, ('end_ms', 'pitch', 'is_placeholder', 'is_slide'))
+    sung_t, sung_end, pitch, is_placeholder, is_slide = windowing.sort_stream(
+        notes['time_ms'], notes['end_ms'], notes['pitch'], notes['is_placeholder'], notes['is_slide'])
     talk_t = np.sort(np.asarray(talkie['time_ms'], dtype=np.float64))
     perc_t = np.sort(np.asarray((percussion or {}).get('time_ms', []), dtype=np.float64))
 
-    new_syllable = ~(sung['is_slide'].astype(bool) | sung['is_placeholder'].astype(bool))
+    new_syllable = ~(is_slide.astype(bool) | is_placeholder.astype(bool))
     syllable_times = np.sort(np.concatenate([sung_t[new_syllable], talk_t]))
     if syllable_times.size == 0:
         return None
 
-    sung_end = sung['end_ms'].astype(np.float64)
+    sung_end = sung_end.astype(np.float64)
     talk_end = talkie_ends(talk_t, sung_t)
-    pitch = sung['pitch'].astype(np.int64)
+    pitch = pitch.astype(np.int64)
     travel = pitch_travel(pitch)
 
     perc_end = np.asarray((percussion or {}).get('end_ms', []), dtype=np.float64)
@@ -131,17 +116,15 @@ def window_arrays(notes, talkie, percussion=None, window_ms=WINDOW_MS, step_ms=S
         default=0.0,
     ))
 
-    n_samples = int(dur_ms // step_ms) + 1
-    grid = np.arange(n_samples, dtype=np.float64) * step_ms
+    grid = windowing.grid_to(dur_ms, step_ms)
 
-    raw_sps = _window_sum(syllable_times, np.ones(syllable_times.size), grid, window_ms)
-    raw_pps = _window_sum(sung_t, travel, grid, window_ms)
-    raw_perc = (_window_sum(perc_t, np.ones(perc_t.size), grid, window_ms)
-                if perc_t.size else np.zeros(grid.size, dtype=np.float64))
+    raw_sps = windowing.windowed_sum(syllable_times, np.ones(syllable_times.size), grid, window_ms)
+    raw_pps = windowing.windowed_sum(sung_t, travel, grid, window_ms)
+    raw_perc = windowing.windowed_sum(perc_t, np.ones(perc_t.size), grid, window_ms)
 
     # onset gates - a window is active only if something starts in it
     active = raw_sps > 0
-    active_sung = _window_sum(sung_t, np.ones(sung_t.size), grid, window_ms) > 0
+    active_sung = windowing.windowed_sum(sung_t, np.ones(sung_t.size), grid, window_ms) > 0
 
     return {
         'time_ms': grid,
@@ -168,16 +151,10 @@ def calc_vocal_metrics(notes, talkie, percussion=None, window_ms=WINDOW_MS, step
 
     dur_s = windows['dur_ms'] / 1000.0
     window_s = window_ms / 1000.0
-    active = windows['active']             # SPS gate
-    active_sung = windows['active_sung']   # PPS gate
-
-    # SPS
     note_count = int(windows['syllable_times'].size)
-    sps_window_values = windows['raw_sps_samples'] / window_s
 
-    # PPS
+    sps_window_values = windows['raw_sps_samples'] / window_s
     pps_window_values = windows['raw_pps_samples'] / window_s
-    total_travel = float(windows['travel'].sum())
 
     # static pitch features - sung notes only
     pitch = windows['pitch']
@@ -194,12 +171,8 @@ def calc_vocal_metrics(notes, talkie, percussion=None, window_ms=WINDOW_MS, step
         'Pitches': pitches,
         'maxPitch': max_pitch,
         'talkieFrac': windows['talkie_count'] / note_count if note_count else 0.0,
-        'pPPS': float(pps_window_values.max()) if pps_window_values.size else 0.0,
-        'aPPS': total_travel / dur_s if dur_s > 0 else 0.0,
-        'medPPS': fret_density.active_median(pps_window_values, active_sung),
-        'stdPPS': fret_density.active_std(pps_window_values, active_sung),
-        'pSPS': float(sps_window_values.max()) if sps_window_values.size else 0.0,
-        'aSPS': note_count / dur_s if dur_s > 0 else 0.0,
-        'medSPS': fret_density.active_median(sps_window_values, active),
-        'stdSPS': fret_density.active_std(sps_window_values, active),
+        # PPS gates on sung-note onsets, SPS on syllable onsets (sung + talkie)
+        **windowing.rate_stats('PPS', pps_window_values, float(windows['travel'].sum()), dur_s,
+                               windows['active_sung']),
+        **windowing.rate_stats('SPS', sps_window_values, note_count, dur_s, windows['active']),
     }

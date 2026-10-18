@@ -27,10 +27,10 @@ import re
 import warnings
 
 import matplotlib
-matplotlib.use('Agg')  # no display in a batch render
+matplotlib.use('Agg')  # no display in a batch render - must run before pyplot is imported
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
-from matplotlib.ticker import MaxNLocator, FuncFormatter
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 import config
 from functions import instruments, timestamp
@@ -253,7 +253,8 @@ def _save(fig, entry, out_dir, bottom_margin=0.06):
     return out_path
 
 
-def _resolve_out_dir(out_dir):
+# PNG folder - explicit --out-dir, else config.RENDER_DIR anchored to the tool's folder (created if missing)
+def resolve_out_dir(out_dir):
     out_dir = pathlib.Path(out_dir) if out_dir else timestamp.project_path(config.RENDER_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
@@ -271,7 +272,7 @@ def _resolve_out_dir(out_dir):
 # render each Fret song - Notes / Variability
 def render_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
     profile = resolve_profile(profile)
-    out_dir = _resolve_out_dir(out_dir)
+    out_dir = resolve_out_dir(out_dir)
 
     with _render_context():
         fig, (ax,) = _new_figure(profile)
@@ -286,7 +287,7 @@ def render_song(entry, curves, difficulty=None, original_diff=None, profile=None
 # render one vocals song - Pitch / Syllables (+ Percussion when charted)
 def render_vocal_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
     profile = resolve_profile(profile)
-    out_dir = _resolve_out_dir(out_dir)
+    out_dir = resolve_out_dir(out_dir)
     has_perc = curves.get('has_perc', False)
 
     lines = [
@@ -307,7 +308,7 @@ def render_vocal_song(entry, curves, difficulty=None, original_diff=None, profil
 # render one drums song - Hands / Travel / Kicks, 2x stacked under 1x when charted
 def render_drum_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
     profile = resolve_profile(profile)
-    out_dir = _resolve_out_dir(out_dir)
+    out_dir = resolve_out_dir(out_dir)
     has_2x = curves.get('has_2x', False)
     time_s = _time_seconds(curves)
 

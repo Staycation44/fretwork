@@ -20,15 +20,17 @@ Hands and kick are separate streams: HPS/TPS are hand-anchored and computed once
 KPS is computed per reading since it's the only axis that differs between 1x and 2x.
 Every avg rate divides by one shared song duration (the later of the two streams' last hit),
 so hand and kick stay comparable to each other.
+
+Window/grid/summary mechanics are shared with 5 fret & vocals in windowing.py
 """
 
 import numpy as np
 
-from functions import fret_density
+from functions import windowing
 
-WINDOW_MS = fret_density.WINDOW_MS
-STEP_MS = fret_density.STEP_MS
-POPCOUNT = fret_density.POPCOUNT
+WINDOW_MS = windowing.WINDOW_MS
+STEP_MS = windowing.STEP_MS
+POPCOUNT = windowing.POPCOUNT
 
 # roll span doesn't define exact lane identity so travel counts 0
 # density is capped at defined rate rather than the charted note rate
@@ -65,30 +67,6 @@ def roll_mask(times, spans):
     return mask
 
 
-# Grid samples needed to cover a stream to its last note
-def n_samples_for(times, step_ms=STEP_MS):
-    if times.size == 0:
-        return 0
-    return int(times[-1] // step_ms) + 1
-
-
-# Uniform window-start grid (t=0 onward, one sample per step)
-def make_grid(n_samples, step_ms=STEP_MS):
-    return np.arange(n_samples, dtype=np.float64) * step_ms
-
-
-# Prefix-sum windowed reducer over an arbitrary (times, values) pair on a caller-built grid
-# Same window logic as VPS - the caller builds the grid once and reuses it across streams
-def windowed_sum(times, values, grid, window_ms=WINDOW_MS):
-    if times.size == 0 or grid.size == 0:
-        return np.zeros(grid.size, dtype=np.float64)
-
-    prefix = np.concatenate(([0.0], np.cumsum(np.asarray(values, dtype=np.float64))))
-    left = np.searchsorted(times, grid, side='left')
-    right = np.searchsorted(times, grid + window_ms, side='left')
-    return prefix[right] - prefix[left]
-
-
 # Song duration shared by every avg (aHPS/aTPS/aKPS) + STAM
 # the later of the two streams last hit
 def song_duration_s(hand_times, kick_mask):
@@ -114,8 +92,7 @@ def song_duration_s(hand_times, kick_mask):
 #            'total_hits':       float,    # roll-capped hit total, for aHPS
 #        }
 def window_arrays(hand_mask, roll_spans=None, window_ms=WINDOW_MS, step_ms=STEP_MS):
-    times = np.asarray(hand_mask['time_ms'], dtype=np.float64)
-    masks = np.asarray(hand_mask['lanes'], dtype=np.uint8)
+    times, masks = windowing.sort_stream(hand_mask['time_ms'], np.asarray(hand_mask['lanes'], dtype=np.uint8))
     roll_spans = roll_spans or []
 
     if times.size == 0:
@@ -133,10 +110,10 @@ def window_arrays(hand_mask, roll_spans=None, window_ms=WINDOW_MS, step_ms=STEP_
         hits_normal = hits
         hits_roll = np.zeros_like(hits)
 
-    grid = make_grid(n_samples_for(times, step_ms), step_ms)
-    hps_normal = windowed_sum(times, hits_normal, grid, window_ms)
-    hps_roll = windowed_sum(times, hits_roll, grid, window_ms)
-    tps_sum = windowed_sum(times, travel, grid, window_ms)
+    grid = windowing.grid_to(times[-1], step_ms)
+    hps_normal = windowing.windowed_sum(times, hits_normal, grid, window_ms)
+    hps_roll = windowing.windowed_sum(times, hits_roll, grid, window_ms)
+    tps_sum = windowing.windowed_sum(times, travel, grid, window_ms)
 
     window_s = window_ms / 1000.0
     hps_sum = hps_normal + np.minimum(hps_roll, ROLL_CAP_HPS * window_s)
@@ -158,15 +135,14 @@ def window_arrays(hand_mask, roll_spans=None, window_ms=WINDOW_MS, step_ms=STEP_
 # One kick reading - bit_mask 0b01 is the 1x (single pedal) stream, 0b11 for 2x
 # None when that reading has no hits at all
 def kick_arrays(kick_mask, bit_mask, window_ms=WINDOW_MS, step_ms=STEP_MS):
-    times = np.asarray(kick_mask['time_ms'], dtype=np.float64)
-    lanes = np.asarray(kick_mask['lanes'], dtype=np.uint8)
+    times, lanes = windowing.sort_stream(kick_mask['time_ms'], np.asarray(kick_mask['lanes'], dtype=np.uint8))
 
     times = times[(lanes & bit_mask) != 0]
     if times.size == 0:
         return None
 
-    grid = make_grid(n_samples_for(times, step_ms), step_ms)
-    kps_sum = windowed_sum(times, np.ones(times.size), grid, window_ms)
+    grid = windowing.grid_to(times[-1], step_ms)
+    kps_sum = windowing.windowed_sum(times, np.ones(times.size), grid, window_ms)
     return {'time_ms': grid, 'raw_kps_samples': kps_sum, 'timestamps_ms': times}
 
 
@@ -194,22 +170,15 @@ def calc_drum_metrics(notes, roll_spans=None, window_ms=WINDOW_MS, step_ms=STEP_
         windows = window_arrays(notes['hand_mask'], roll_spans, window_ms, step_ms)
     if windows is not None:
         hps_window_values = windows['raw_hps_samples'] / window_s
-        hps_active_mask = hps_window_values > 0   # active window mask used for both HPS & TPS
-
         tps_window_values = windows['raw_tps_samples'] / window_s
+        hps_active_mask = hps_window_values > 0   # active window mask used for both HPS & TPS (gated by hit activity)
 
         hand_out = {
-            'aHPS': (windows['total_hits'] / dur_s) if dur_s > 0 else 0.0,
-            'pHPS': float(hps_window_values.max()) if hps_window_values.size else 0.0,
-            'stdHPS': fret_density.active_std(hps_window_values, hps_active_mask),   # gated by hit activity
-            'medHPS': fret_density.active_median(hps_window_values, hps_active_mask),  # gated by hit activity
-            'aTPS': (float(windows['travel'].sum()) / dur_s) if dur_s > 0 else 0.0,
-            'pTPS': float(tps_window_values.max()) if tps_window_values.size else 0.0,
-            'stdTPS': fret_density.active_std(tps_window_values, hps_active_mask),   # gated by hit activity
-            'medTPS': fret_density.active_median(tps_window_values, hps_active_mask),  # gated by hit activity
+            **windowing.rate_stats('HPS', hps_window_values, windows['total_hits'], dur_s, hps_active_mask),
+            **windowing.rate_stats('TPS', tps_window_values, float(windows['travel'].sum()), dur_s, hps_active_mask),
         }
 
-    # KPS per 1x/2x
+    # KPS per 1x/2x, gated by kick activity
     readings = {}
     for mode, bit_mask in (('1x', 0b01), ('2x', 0b11)):
         kicks = kick_arrays(kick_mask, bit_mask, window_ms, step_ms)
@@ -218,14 +187,10 @@ def calc_drum_metrics(notes, roll_spans=None, window_ms=WINDOW_MS, step_ms=STEP_
             continue
 
         kps_window_values = kicks['raw_kps_samples'] / window_s
-        kps_active_mask = kps_window_values > 0
-
         readings[mode] = {
             'time_ms': kicks['timestamps_ms'],
-            'aKPS': (float(kicks['timestamps_ms'].size) / dur_s) if dur_s > 0 else 0.0,
-            'pKPS': float(kps_window_values.max()) if kps_window_values.size else 0.0,
-            'stdKPS': fret_density.active_std(kps_window_values, kps_active_mask),   # gated by kick activity
-            'medKPS': fret_density.active_median(kps_window_values, kps_active_mask),  # gated by kick activity
+            **windowing.rate_stats('KPS', kps_window_values, float(kicks['timestamps_ms'].size), dur_s,
+                                   kps_window_values > 0),
         }
 
     # 2x only exists if there are notes for it

@@ -8,6 +8,8 @@ preserving everything else in the file byte-for-byte (encoding, BOM/byte order, 
     - every occurrence of a key is updated (the parser reads the last duplicate, the game may read either)
     - keys that don't exist yet are added at the end of [song], a value of None removes the key
     - files are only rewritten when something actually changed, via a temp file + os.replace
+    - a symlinked song.ini is written through to its target, the link itself is left in place
+    - song.ini is found case-insensitively (Song.ini / SONG.INI on Linux)
 
 The backup CSV lives with the cache files:
     - one row per song, one column per instrument's diff_* tag
@@ -16,12 +18,13 @@ The backup CSV lives with the cache files:
     - Build fills blank cells from the current song.ini (safe, since nothing is written to a blank cell)
 """
 
+import collections
 import csv
 import os
 import pathlib
 import shutil
 
-from functions import instruments, timestamp
+from functions import instruments, library_walk, timestamp
 
 # backup CSV columns: song_path + one column per instrument's actual ini tag name
 BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
@@ -31,35 +34,23 @@ VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
 MISSING = "missing"
 
 # song folder -> its song.ini, joined by pathlib so the separator matches song_path's
+# matched case-insensitively, the canonical spelling is returned when there's no file at all
 def song_ini_path(song_path):
-    return pathlib.Path(song_path) / "song.ini"
+    folder = pathlib.Path(song_path)
+    return library_walk.find_ci(folder, "song.ini") or folder / "song.ini"
 
 
-# .sng songs are keyed by the container file itself
-# there's no song.ini to patch, so CalcTier/RemapDiff/Restore writes are skipped
-CONTAINER_EXTS = ('.sng',)
-
-# _rb3con packages commonly ship with no dotted extension at all
-_RB3CON_SUFFIXES = ('_rb3con', '.rb3con')
-
-# loose DTA packs are keyed "{songs.dta path}::{shortname}" - no song.ini to patch either
-_DTA_PACK_NAME = 'songs.dta'
-
+# Songs with no song.ini to patch, so CalcTier/RemapDiff/Restore writes are skipped:
+#   rb3con and loose songs.dta packs are always keyed "{file}::{song id}" - whatever the file is
+#   named, which covers rb3cons found by their STFS magic with no recognizable suffix
+#   .sng songs are keyed by the container file itself
 def is_container_song(song_path):
-    base = song_path.split('::', 1)[0]
-    if pathlib.Path(base).suffix.lower() in CONTAINER_EXTS:
-        return True
-    lname = pathlib.Path(base).name.lower()
-    if lname == _DTA_PACK_NAME and '::' in song_path:
-        return True
-    return any(lname.endswith(suffix) for suffix in _RB3CON_SUFFIXES)
+    return '::' in song_path or pathlib.Path(song_path).suffix.lower() == '.sng'
 
 # ---------------------------------------------------------------------
 # ini read/write
 # ---------------------------------------------------------------------
 
-# -> (text, codec) where codec = (python codec, BOM bytes, error handler) round-trips the file exactly
-# surrogateescape/surrogatepass keep undecodable bytes / lone surrogates intact through a rewrite
 def _read_text(file):
     raw = pathlib.Path(file).read_bytes()
     if raw.startswith(b'\xff\xfe'):
@@ -81,7 +72,7 @@ def _read_text(file):
 # temp file in the same folder + os.replace, so an interrupted write never truncates song.ini
 def _write_text(file, text, codec):
     name, bom, errors = codec
-    file = pathlib.Path(file)
+    file = pathlib.Path(file).resolve()
     tmp = file.with_name(file.name + ".fretwork.tmp")
     try:
         tmp.write_bytes(bom + text.encode(name, errors=errors))
@@ -157,6 +148,25 @@ def update_ini_values(ini_path, values):
     return True
 
 
+# one song's diff_* patch -> (outcome, failure row or None)
+# outcome: 'written' | 'unchanged' | 'container' | 'failed'
+def _patch_song(song_path, values):
+    if is_container_song(song_path):
+        return 'container', None
+    ini_path = song_ini_path(song_path)
+    if not ini_path.is_file():
+        # song folder moved or deleted since BUILD
+        return 'failed', (song_path, 'FileNotFoundError', f"no song.ini at {ini_path}")
+    try:
+        return ('written' if update_ini_values(ini_path, values) else 'unchanged'), None
+    except Exception as exc:
+        return 'failed', (song_path, type(exc).__name__, str(exc))
+
+
+def _report(lead, tally, parts):
+    print(lead + ''.join(f", {tally[key]} {label}" for key, label in parts if tally[key]))
+
+
 # ---------------------------------------------------------------------
 # Backup - written by build.py / read by restore_from_backup() and the write guard
 # ---------------------------------------------------------------------
@@ -170,7 +180,17 @@ def _cell(value):
     return MISSING if value is None else str(value)
 
 
-# song_path -> row dict (every BACKUP_COLUMNS name present, blank where empty)
+def _replace_csv(path, write_rows):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            write_rows(f)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def load_backup_rows(header):
     backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
@@ -204,8 +224,7 @@ def migrate_backup_header(backup_csv):
             raise ValueError(f"unrecognised backup CSV header in {backup_csv}: {header}")
         rows = list(reader)
 
-    tmp = backup_csv.with_suffix(backup_csv.suffix + ".tmp")
-    with open(tmp, "w", newline="", encoding="utf-8") as f:
+    def write_rows(f):
         writer = csv.writer(f)
         writer.writerow(BACKUP_COLUMNS)
         for row in rows:
@@ -213,7 +232,8 @@ def migrate_backup_header(backup_csv):
             # carries its extra fields, in BACKUP_COLUMNS order, past the header
             extra = row[len(header):len(BACKUP_COLUMNS)]
             writer.writerow(row[:len(header)] + extra + [''] * (len(added) - len(extra)))
-    os.replace(tmp, backup_csv)
+
+    _replace_csv(backup_csv, write_rows)
     print(f"Backup CSV header updated: {backup_csv} (+{', +'.join(added)})")
     return True
 
@@ -288,31 +308,28 @@ def backup_data(songs, header):
     if not (added or filled):
         return 0, 0
 
-    tmp = backup_csv.with_suffix(backup_csv.suffix + ".tmp")
-    with open(tmp, "w", newline="", encoding="utf-8") as f:
+    def write_rows(f):
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore', restval='')
         writer.writeheader()
         writer.writerows(rows)
-    os.replace(tmp, backup_csv)
+
+    _replace_csv(backup_csv, write_rows)
 
     return added, filled
 
 
 # Restores every song.ini for header back to its backed-up diff_* values
 # 'missing' cells remove the tag again, blank cells are left alone
-# Returns (restored_count, unchanged_count, container_count, failures)
-#   container_count - .sng/rb3con/songs.dta songs, backed up but never written (no song.ini to patch)
-#   failures        - a song folder was moved, deleted, etc
+# Returns (tally, failures)
+#   tally    - Counter of 'written' / 'unchanged' / 'container' (.sng/rb3con/songs.dta, no song.ini to patch)
+#   failures - (song_path, error, message) rows - a song folder was moved, deleted, etc
 def restore_from_backup(header):
     backup_csv = backup_csv_path(header)
     if not backup_csv.exists():
         raise FileNotFoundError(f"No backup found for header '{header}' at {backup_csv}")
     migrate_backup_header(backup_csv)
 
-    restored = 0
-    unchanged = 0
-    containers = 0
-    failed = []
+    tally, failed = collections.Counter(), []
     for song_path, row in load_backup_rows(header).items():
         values = {
             diff_tag: (None if row[diff_tag] == MISSING else row[diff_tag])
@@ -322,26 +339,12 @@ def restore_from_backup(header):
         if not values:
             continue  # every column blank, leave song.ini alone
 
-        # containers have no song.ini to patch - counted, not failed
-        if is_container_song(song_path):
-            containers += 1
-            continue
+        outcome, failure = _patch_song(song_path, values)
+        tally[outcome] += 1
+        if failure:
+            failed.append(failure)
 
-        ini_path = song_ini_path(song_path)
-        if not ini_path.is_file():
-            # song folder moved or deleted since BUILD
-            failed.append((song_path, None, 'FileNotFoundError', f"no song.ini at {ini_path}"))
-            continue
-
-        try:
-            if update_ini_values(ini_path, values):
-                restored += 1
-            else:
-                unchanged += 1
-        except Exception as exc:
-            failed.append((song_path, None, type(exc).__name__, str(exc)))
-
-    return restored, unchanged, containers, failed
+    return tally, failed
 
 
 # -----------------------------------------------------------------------------
@@ -350,11 +353,10 @@ def restore_from_backup(header):
 # mode:          None | "CalcTier" | "RemapDiff" | "Restore"
 # instrument:    which instrument's diff_* tag to write (required for CalcTier/RemapDiff,
 #                unused/omit for Restore - Restore always covers every instrument at once)
-# songs:         iterable of song_path for diff write modes
 # difficulties:  dict song_path -> {'RemapDiff': int, 'CalcTier': int} for diff write modes
 # backup_rows:   load_backup_rows(header), loaded once by the caller - songs without a
 #                backed-up cell for this instrument are skipped (their original isn't safe yet)
-def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None, backup_rows=None):
+def sync_difficulty(mode, header, instrument=None, difficulties=None, backup_rows=None):
     if mode is None:
         return None
 
@@ -362,49 +364,38 @@ def sync_difficulty(mode, header, instrument=None, songs=None, difficulties=None
         raise ValueError(f"Unknown diff mode '{mode}', expected one of {VALID_MODES} or None")
 
     if mode == "Restore":
-        restored, unchanged, containers, failed = restore_from_backup(header)
-        print(f"Restored {restored} song.inis from backup" +
-              (f", {unchanged} unchanged (all instruments already original tag)" if unchanged else "") +
-              (f", {containers} skipped (container)" if containers else "") +
-              (f", {len(failed)} failed" if failed else ""))
-        return {"mode": mode, "restored": restored, "unchanged": unchanged,
-                "skipped_container": containers, "failed": failed}
+        tally, failed = restore_from_backup(header)
+        _report(f"Restored {tally['written']} song.inis from backup", tally, [
+            ('unchanged', "unchanged (all instruments already original tag)"),
+            ('container', "skipped (container)"),
+            ('failed', "failed"),
+        ])
+        return {"mode": mode, "restored": tally['written'], "unchanged": tally['unchanged'],
+                "skipped_container": tally['container'], "failed": failed}
 
-    if songs is None or difficulties is None or instrument is None:
-        raise ValueError(f"diff mode '{mode}' needs songs + difficulties + instrument")
+    if difficulties is None or instrument is None:
+        raise ValueError(f"diff mode '{mode}' needs difficulties + instrument")
 
     if backup_rows is None:
         backup_rows = load_backup_rows(header)
     diff_tag = instruments.DIFF_TAGS[instrument]
 
-    applied = 0
-    unchanged = 0
-    not_backed_up = 0
-    containers = 0
-    failed = []
-    for song_path in songs:
-        if is_container_song(song_path):
-            containers += 1
+    tally, failed = collections.Counter(), []
+    for song_path, song_diffs in difficulties.items():
+        # containers are reported as such even when they're also not backed up
+        if not is_container_song(song_path) and not backup_rows.get(song_path, {}).get(diff_tag):
+            tally['not_backed_up'] += 1
             continue
-        if not backup_rows.get(song_path, {}).get(diff_tag):
-            not_backed_up += 1
-            continue
-        ini_path = song_ini_path(song_path)
-        if not ini_path.is_file():
-            failed.append((song_path, 'FileNotFoundError', f"no song.ini at {ini_path}"))
-            continue
-        try:
-            if update_ini_values(ini_path, {diff_tag: difficulties[song_path][mode]}):
-                applied += 1
-            else:
-                unchanged += 1
-        except Exception as exc:
-            failed.append((song_path, type(exc).__name__, str(exc)))
+        outcome, failure = _patch_song(song_path, {diff_tag: song_diffs[mode]})
+        tally[outcome] += 1
+        if failure:
+            failed.append(failure)
 
-    print(f"Applied {mode} to {applied} song.inis [{instrument}]" +
-          (f", {unchanged} unchanged (already the written value)" if unchanged else "") +
-          (f", {not_backed_up} not backed up (skipped)" if not_backed_up else "") +
-          (f", {containers} skipped (container)" if containers else "") +
-          (f", {len(failed)} failed" if failed else ""))
-    return {"mode": mode, "instrument": instrument, "applied": applied, "unchanged": unchanged,
-            "not_backed_up": not_backed_up, "skipped_container": containers, "failed": failed}
+    _report(f"Applied {mode} to {tally['written']} song.inis [{instrument}]", tally, [
+        ('unchanged', "unchanged (already the written value)"),
+        ('not_backed_up', "not backed up (skipped)"),
+        ('container', "skipped (container)"),
+        ('failed', "failed"),
+    ])
+    return {"mode": mode, "instrument": instrument, "applied": tally['written'], "unchanged": tally['unchanged'],
+            "not_backed_up": tally['not_backed_up'], "skipped_container": tally['container'], "failed": failed}

@@ -28,8 +28,6 @@ CHART_PARSER - Parses notes.chart files into per-instrument, per-level note stre
 EMHX: .chart differentiates level purely by section-name prefix
 note numbering (0-4 fret, 7 open) is identical across all four potential sections
 
-parse_chart() already read every section in the file (woohoo inefficiency!), so almost no added cost
-
 ===5 FRET===
 guitar/coop/rhythm/bass/keys encoding
     One uint8 per tick. Bit N set means fret N is played:
@@ -46,30 +44,24 @@ NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are disc
 DROPPED: star power ('S 2') and solo ('E solo') events are skipped
 """
 
-import concurrent.futures as cf
-import os
 import pathlib
 
-import numpy as np
-import tqdm
-
 from functions import instruments
-from parsers.text_decode import read_text
-from parsers.timing import clean_tempos, tempo_map, ticks_to_ms
+from parsers import pool, text_decode, timing
 
 # ------------------------
 # Chart-specific constants
 # ------------------------
-# 5 fret note numbers
+# 5 fret note numbers -> lane mask bit
 OPEN_NOTE = 7
-NOTE_FRETS = {0, 1, 2, 3, 4, OPEN_NOTE}
+NOTE_TO_BIT = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, OPEN_NOTE: instruments.OPEN_BIT}
 
 # Drum note numbers
 DRUM_KICK_NOTE = 0
 DRUM_2X_KICK_NOTE = 32
 DRUM_HAND_NOTES = {1, 2, 3, 4, 5}
 
-# Roll lane special phrase types: S <type> <length> 
+# Roll lane special phrase types: S <type> <length>
 # can't overcount these because of the charted notes vs actual implication for difficulty
 DRUM_ROLL_TYPE_TO_KIND = {65: 'single', 66: 'double'}
 
@@ -80,8 +72,7 @@ DEFAULT_RESOLUTION = 192
 # Raw section parsing (chart's [Section] / key = value text format)
 # ---------------------------------------------------------------------
 
-# Parses already-decoded .chart text - shared by parse_chart() (notes.chart on disk, decoded via
-# text_decode.read_text) and a .sng-embedded chart (decoded via text_decode.decode_text)
+# Parses already-decoded .chart text
 def parse_chart_text(text):
     c_dict = {}
     c_sect = None
@@ -110,28 +101,16 @@ def parse_chart_text(text):
     return c_dict
 
 
-# decoded the same way as song.ini (utf-8 / utf-16 BOM / cp1252 fallback)
-def parse_chart(chart_source):
-    return parse_chart_text(read_text(chart_source))
-
-# SyncTrack 'B <bpm*1000>' markers -> tempo arrays for tick -> ms conversion
-# Returns (tempo arrays, dropped) - dropped is [(tick, bpm)] for zero/invalid markers that were skipped
-def build_tempo_map(sync_track, tick_res):
+# SyncTrack 'B <bpm*1000>' markers -> raw {tick: bpm}
+# zero/invalid markers are dropped and logged by timing.converter
+def _chart_tempos(sync_track):
     tempos = {}
-    dropped = []
     for tick, markers in sync_track.items():
-        tick = int(tick)
         markers = markers if isinstance(markers, list) else [markers]
         for marker in markers:
             if marker.startswith('B'):
-                bpm = int(marker.split()[1]) / 1000
-                if bpm > 0:
-                    tempos[tick] = bpm
-                else:
-                    dropped.append((tick, bpm))
-
-    tempos, invalid = clean_tempos(tempos)
-    return tempo_map(tempos, tick_res), sorted(dropped + invalid)
+                tempos[int(tick)] = int(marker.split()[1]) / 1000
+    return tempos
 
 
 # ----------------------
@@ -144,7 +123,6 @@ def build_tempo_map(sync_track, tick_res):
 # Returns None if the section has no usable notes
 def _extract_section(section, instrument_key, to_ms_array):
     allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
-    note_frets = NOTE_FRETS if allow_opens else (NOTE_FRETS - {OPEN_NOTE})
 
     masks_by_tick = {}
 
@@ -157,42 +135,20 @@ def _extract_section(section, instrument_key, to_ms_array):
             # 'N <fret> <length>' - everything else is skipped
             if len(parts) >= 2 and parts[0] == 'N':
                 n_val = int(parts[1])
-                if n_val in note_frets:
-                    mask |= 1 << n_val
+                if n_val in NOTE_TO_BIT and (allow_opens or n_val != OPEN_NOTE):
+                    mask |= 1 << NOTE_TO_BIT[n_val]
 
         if mask:  # skip ticks that only carried modifiers or phrases
             masks_by_tick[int(tick_str)] = mask
 
     if not masks_by_tick:
         return None
-
-    ordered_ticks = sorted(masks_by_tick)
-
-    return {
-        'notes': {
-            'time_ms': to_ms_array(ordered_ticks),
-            'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
-        },
-    }
+    return {'notes': timing.masks_to_stream(masks_by_tick, to_ms_array)}
 
 
 #---------------
 # DRUM STUFF
 #---------------
-
-# Drum prep
-def _drum_stream(masks_by_tick, to_ms_array):
-    if not masks_by_tick:
-        return {
-            'time_ms': np.empty(0, dtype=np.float64),
-            'lanes': np.empty(0, dtype=np.uint8),
-        }
-    ordered_ticks = sorted(masks_by_tick)
-    return {
-        'time_ms': to_ms_array(ordered_ticks),
-        'lanes': np.array([masks_by_tick[t] for t in ordered_ticks], dtype=np.uint8),
-    }
-
 
 # Drum equivalent of _extract_section, splits hands/kick
 def _extract_drum_section(section, to_ms_array):
@@ -227,8 +183,8 @@ def _extract_drum_section(section, to_ms_array):
 
     return {
         'notes': {
-            'hand_mask': _drum_stream(hand_by_tick, to_ms_array),
-            'kick_mask': _drum_stream(kick_by_tick, to_ms_array),
+            'hand_mask': timing.masks_to_stream(hand_by_tick, to_ms_array),
+            'kick_mask': timing.masks_to_stream(kick_by_tick, to_ms_array),
         },
     }
 
@@ -284,16 +240,9 @@ def _chart_notes_from_dict(c_dict, song_path, warn_label=None):
             raise ValueError(f"Missing required section '{required}' in {warn_label}")
 
     tick_res, res_warning = _chart_resolution(c_dict['Song'])
-    tempo_arrs, dropped_tempos = build_tempo_map(c_dict['SyncTrack'], tick_res)
-    warnings = [
-        (warn_label, 'InvalidTempo', f"skipped tempo marker at tick {tick} ({bpm} BPM)")
-        for tick, bpm in dropped_tempos
-    ]
+    to_ms_array, warnings = timing.converter(_chart_tempos(c_dict['SyncTrack']), tick_res, warn_label)
     if res_warning:
         warnings.append((warn_label, 'InvalidResolution', res_warning))
-
-    def to_ms_array(ticks):
-        return ticks_to_ms(ticks, tick_res, *tempo_arrs)
 
     instruments_out = {}
     roll_spans_out = {}
@@ -341,8 +290,9 @@ def _chart_notes_from_dict(c_dict, song_path, warn_label=None):
     }
 
 
+# notes.chart on disk, decoded the same way as song.ini (utf-8 / utf-16 BOM / cp1252 fallback)
 def chart_notes(chart_source):
-    c_dict = parse_chart(chart_source)
+    c_dict = parse_chart_text(text_decode.read_text(chart_source))
     song_path = str(pathlib.Path(chart_source).parent.resolve())
     return _chart_notes_from_dict(c_dict, song_path, warn_label=str(chart_source))
 
@@ -363,38 +313,10 @@ def _chart_notes_worker(file):
     try:
         return chart_notes(file), None
     except Exception as exc:
-        return None, (str(file), type(exc).__name__, str(exc) or repr(exc))
+        return None, pool.error_row(file, exc)
 
 
-# max_workers=None -> leave one core free (uncapped maxes out CPU lol)
-def _resolve_workers(max_workers):
-    if max_workers is not None:
-        return max(1, int(max_workers))
-    return max(1, (os.cpu_count() or 1) - 1)
-
-
-# loops through path and reports errors for unparseable files
-def chart_loop(search_path, errors=None, max_workers=None, files=None):
-    chart_out = {}
-
-    if files is None:
-        files = list(pathlib.Path(search_path).rglob("notes.chart"))
-
-    if not files:
-        return chart_out
-
-    workers = _resolve_workers(max_workers)
-    chunksize = max(1, len(files) // (workers * 4))
-
-    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(_chart_notes_worker, files, chunksize=chunksize)
-        for stream, error in tqdm.tqdm(results, total=len(files), desc="Parsing charts", unit="file"):
-            if stream is not None:
-                warnings = stream.pop('warnings', [])
-                if errors is not None:
-                    errors.extend(warnings)
-                chart_out[stream['song_path']] = stream
-            elif errors is not None:
-                errors.append(error)
-
-    return chart_out
+# notes.chart files -> {song_path: stream}, errors appended to errors
+def chart_loop(files, errors=None, max_workers=None):
+    results = pool.run_parallel(_chart_notes_worker, files, "Parsing charts", "file", max_workers)
+    return pool.collect_streams(results, errors)

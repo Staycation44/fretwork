@@ -1,7 +1,7 @@
 """
 VOCAL_PARSER - Extracts PART VOCALS into note/talkie/percussion streams for the cache
 
-_extract_vocal_track(track, to_ms_array) returns
+extract_vocal_track(track, to_ms_array) returns
     {'expert': {'notes': {...}, 'talkie': {...}, 'percussion': {...}}}
     or None if the track has no sung notes, talkie onsets, or percussion hits
 
@@ -54,7 +54,7 @@ def _lyric_base(text):
     return None if text is None else text.rstrip(LYRIC_FORMAT_MARKS)
 
 
-def _extract_vocal_track(track, to_ms_array):
+def extract_vocal_track(track, to_ms_array):
     # One chronological scan of the mido messages
     open_by_note = {}
     pitched_pairs = []

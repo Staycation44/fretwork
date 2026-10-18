@@ -10,9 +10,18 @@ Three bracket kinds nest the same way here:
     [ ]  macros/properties
 Everything parses into nested Python lists; quoted strings and bare symbols both come back as str
 
-Field reference: https://rock-band-customs.gitlab.io/authoring-dtas.html
+Song metadata shared by both: song_pairs() turns an entry's block into the same ini-style {key: value} pairs song.ini gives
+
+DIFFICULTY: DTA rank values are RB3's own internal difficulty scores
+RANK_DIFF_MAPS (to bring them back into 0-6 range) was checked against a few sources
+
+ONYX: https://github.com/mtolly/onyx 
+RB3 Difficulty Slider: https://github.com/StackOverflow0x/RB3-Difficulty-Slider
+value/field reference: https://rock-band-customs.gitlab.io/authoring-dtas.html
 GH2 songs.dta reference: https://mariteaux.somnolescent.net/modding/guitar-hero/tutorials/adding-new-song-definitions/
 """
+
+from functions import instruments
 
 OPENERS = '({['
 CLOSERS = ')}]'
@@ -157,3 +166,63 @@ def decode_string(song_entry, value):
         except UnicodeDecodeError:
             pass
     return value
+
+
+# ------------------------
+# Song metadata
+# ------------------------
+
+# RB3 rank->tier breakpoints
+RANK_DIFF_MAPS = {
+    'drums':  [124, 151, 178, 242, 345, 448],
+    'vocals': [132, 175, 218, 279, 353, 427],
+    'bass':   [135, 181, 228, 293, 364, 436],
+    'guitar': [139, 176, 221, 267, 333, 409],
+    'keys':   [153, 211, 269, 327, 385, 443],
+    'band':   [163, 215, 243, 267, 292, 345],
+}
+
+# dta rank block key -> fretwork instrument key
+# pro/real insts OOS
+RANK_KEY_TO_INSTRUMENT = {
+    'drum': 'drums', 'guitar': 'guitar', 'bass': 'bass',
+    'vocals': 'vocals', 'keys': 'keys', 'band': 'band',
+}
+
+
+# rank -> tier, on song.ini's 0-6 diff tag scale
+def rank_to_tier(diff_map, rank):
+    tier = 0
+    for threshold in (1, *diff_map):
+        if threshold > rank:
+            break
+        tier += 1
+    return tier - 1 if tier else 0
+
+
+# (rank ...) block -> {diff_* tag: tier string}
+def difficulties_from_rank(song_entry):
+    rank_pairs = find(song_entry, 'rank') or []
+    diffs = {}
+    for pair in rank_pairs:
+        if not isinstance(pair, list) or len(pair) < 2:
+            continue
+        instrument_key = RANK_KEY_TO_INSTRUMENT.get(str(pair[0]).lower())
+        if instrument_key is None:
+            continue
+        try:
+            rank = int(float(pair[1]))
+        except (TypeError, ValueError):
+            continue
+        diffs[instruments.DIFF_TAGS[instrument_key]] = str(rank_to_tier(RANK_DIFF_MAPS[instrument_key], rank))
+    return diffs
+
+
+# song entry -> ini-style pairs: rank-based diff_* tags + decoded name/artist where present
+def song_pairs(song_entry):
+    pairs = difficulties_from_rank(song_entry)
+    for key in ('name', 'artist'):
+        value = decode_string(song_entry, find_text(song_entry, key))
+        if value:
+            pairs[key] = value
+    return pairs

@@ -9,10 +9,13 @@ Additionally backs up every song's original diff_* values w/ instrument columns 
 Existing backup rows are never overwritten - only their blank cells get filled from the current song.ini
 (Analyze never writes to a blank cell, so a blank cell still holds the original)
 
-The library is walked once: 
- - song.ini / notes.chart / notes.mid combinations built out by the parsers 
+The library is walked once:
+ - song.ini / notes.chart / notes.mid combinations built out by the parsers
  - .sng / rb3con containers are unpacked in memory and reshaped to go into the cache
  - loose songs.dta packs (unpacked GH2 ARKs, Onyx DIY folders) are read song by song from the .dta + each song's .mid
+
+The walk follows symlinked/junctioned folders, each real folder visited once (see library_walk),
+and matches song.ini / notes.* names case-insensitively on every platform
 
 folders with a chart/mid but no song.ini plus unsupported .yargsong files are counted in the report
 
@@ -30,17 +33,16 @@ import os
 import pathlib
 
 import config
-from functions import instruments, ini_updater, timestamp
+from functions import cache as cache_mod, ini_updater, instruments, library_walk, timestamp
 from parsers import chart_parser, dta_parser, ini_parser, mid_parser, rb3con_parser, sng_parser
-from functions import cache as cache_mod
 
 # The ini columns that survive to the metrics spreadsheet, aside from per-instrument Difficulty
 META_KEYS = ('Name', 'Artist', 'Charter', 'Release', 'Official')
 
-# names matched the way the file system does
-_INI_NAME = os.path.normcase("song.ini")
-_CHART_NAME = os.path.normcase("notes.chart")
-_MID_NAME = os.path.normcase("notes.mid")
+# names matched case-insensitively on every platform (Linux included)
+_INI_NAME = "song.ini"
+_CHART_NAME = "notes.chart"
+_MID_NAME = "notes.mid"
 
 # .sng (Clone Hero container)
 SNG_EXTS = ('.sng',)
@@ -55,9 +57,9 @@ def scan_library(search_path):
     unsupported = {ext: 0 for ext in UNSUPPORTED_EXTS}
     ini_dirs, note_dirs = set(), set()
 
-    for dirpath, _dirnames, filenames in os.walk(search_path):
+    for dirpath, _dirnames, filenames in library_walk.walk_library(search_path):
         for name in filenames:
-            key = os.path.normcase(name)
+            key = name.lower()
             if key == _INI_NAME:
                 ini_files.append(pathlib.Path(dirpath, name))
                 ini_dirs.add(dirpath)
@@ -101,39 +103,27 @@ def scan_library(search_path):
 #
 # A folder with both notes.mid and notes.chart uses the midi
 # chart fallback when midi fails to parse
-def build_note_index(search_path, errors, scan=None):
-    scan = scan or {}
-    mid_files = scan.get('mid')
-    if mid_files is None:
-        mid_files = list(pathlib.Path(search_path).rglob("notes.mid"))
-    chart_files = scan.get('chart')
-    if chart_files is None:
-        chart_files = list(pathlib.Path(search_path).rglob("notes.chart"))
-
-    mid_streams = mid_parser.mid_loop(search_path, errors, max_workers=config.PARSE_MAX_WORKERS,
-                                      files=mid_files)
+def build_note_index(scan, errors):
+    mid_streams = mid_parser.mid_loop(scan['mid'], errors, max_workers=config.PARSE_MAX_WORKERS)
 
     # keyed the same way the parsers key song_path
-    mid_dirs = {str(pathlib.Path(f).parent.resolve()) for f in mid_files}
+    mid_dirs = {str(pathlib.Path(f).parent.resolve()) for f in scan['mid']}
     charts_to_parse = []
-    for chart_file in chart_files:
+    for chart_file in scan['chart']:
         folder = str(pathlib.Path(chart_file).parent.resolve())
         if folder in mid_streams:
-            if errors is not None:
-                errors.append((str(chart_file), 'MultipleChart',
-                               "folder also has notes.mid - notes.mid used, notes.chart ignored"))
+            errors.append((str(chart_file), 'MultipleChart',
+                           "folder also has notes.mid - notes.mid used, notes.chart ignored"))
             continue
         charts_to_parse.append(chart_file)
 
-    chart_streams = chart_parser.chart_loop(search_path, errors, max_workers=config.PARSE_MAX_WORKERS,
-                                            files=charts_to_parse)
+    chart_streams = chart_parser.chart_loop(charts_to_parse, errors, max_workers=config.PARSE_MAX_WORKERS)
 
     # chart fallback
-    if errors is not None:
-        for song_path in chart_streams:
-            if song_path in mid_dirs:
-                errors.append((song_path, 'ChartFallback',
-                               "notes.mid failed to parse - using notes.chart instead"))
+    for song_path in chart_streams:
+        if song_path in mid_dirs:
+            errors.append((song_path, 'ChartFallback',
+                           "notes.mid failed to parse - using notes.chart instead"))
 
     note_index = {}
     note_index.update(chart_streams)
@@ -161,22 +151,21 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     scan = scan_library(search_path)
 
-    ini_rows = ini_parser.ini_loop(search_path, errors, files=scan['ini'])
+    # parse song.ini files into metadata rows keyed to song folder path
+    ini_rows = ini_parser.ini_loop(scan['ini'], errors)
+    folder_ini_count = len(ini_rows)
 
-    # .sng containers carry their own metadata + notes.mid/.chart
-    # each container is one song keyed by resolved file path
+    # parse .sng / rb3con / songs.dta containers into metadata rows + note streams keyed to song folder path
     sng_ini_rows, sng_note_streams = sng_parser.sng_loop(
-        search_path, errors, max_workers=config.PARSE_MAX_WORKERS, files=scan.get('sng'))
+        scan['sng'], errors, max_workers=config.PARSE_MAX_WORKERS)
     ini_rows.update(sng_ini_rows)
 
-    # rb3con packages carry their own metadata (songs.dta) + notes.mid
     rb3con_ini_rows, rb3con_note_streams = rb3con_parser.rb3con_loop(
-        search_path, errors, max_workers=config.PARSE_MAX_WORKERS, files=scan.get('rb3con'))
+        scan['rb3con'], errors, max_workers=config.PARSE_MAX_WORKERS)
     ini_rows.update(rb3con_ini_rows)
 
-    # loose songs.dta packs carry their own metadata + per-song .mid files
     dta_ini_rows, dta_note_streams = dta_parser.dta_loop(
-        search_path, errors, max_workers=config.PARSE_MAX_WORKERS, files=scan.get('dta'))
+        scan['dta'], errors, max_workers=config.PARSE_MAX_WORKERS)
     ini_rows.update(dta_ini_rows)
 
     if not ini_rows:
@@ -185,13 +174,12 @@ def build_cache(search_path=None, header=None, out_dir=None):
             f"SEARCH_PATH in config.py or pass --search-path"
         )
 
-    note_index = build_note_index(search_path, errors, scan)
+    note_index = build_note_index(scan, errors)
     note_index.update(sng_note_streams)
     note_index.update(rb3con_note_streams)
     note_index.update(dta_note_streams)
 
     songs = {}
-    no_instruments = 0
     instrument_counts = {
         key: {level: 0 for level in instruments.LEVEL_KEYS}
         for key in instruments.INSTRUMENT_KEYS
@@ -200,49 +188,13 @@ def build_cache(search_path=None, header=None, out_dir=None):
     for song_path, ini_row in ini_rows.items():
         stream = note_index.get(song_path)
         if stream is None:
-            no_instruments += 1  # ini exists but no parseable chart or mid
-            continue
+            continue  # ini exists but no parseable chart or mid
 
-        song_instruments = {}
-        for instrument_key, levels in stream['instruments'].items():
-            song_levels = {}
-            for level_key, level_stream in levels.items():
-                notes = level_stream['notes']
-
-                # Defensive/redundant: every parser already checks for empty streams
-                if instrument_key == 'drums':
-                    is_empty = (
-                        len(notes['hand_mask']['time_ms']) == 0
-                        and len(notes['kick_mask']['time_ms']) == 0
-                    )
-                # for vocals empty means no pitch, no perc, no talkie
-                elif instrument_key == 'vocals':
-                    talkie = level_stream['talkie']
-                    percussion = level_stream['percussion']
-                    is_empty = (
-                        len(notes['time_ms']) == 0
-                        and len(talkie['time_ms']) == 0
-                        and len(percussion['time_ms']) == 0
-                    )
-                else:
-                    is_empty = len(notes['time_ms']) == 0
-
-                if is_empty:
-                    errors.append((
-                        song_path, 'EmptyStream',
-                        f'{instrument_key} ({level_key}): parsed to zero notes',
-                    ))
-                    continue
-
-                song_levels[level_key] = level_stream
+        # every parser only returns levels with notes, and raises on a file with no usable instrument
+        song_instruments = stream['instruments']
+        for instrument_key, levels in song_instruments.items():
+            for level_key in levels:
                 instrument_counts[instrument_key][level_key] += 1
-
-            if song_levels:
-                song_instruments[instrument_key] = song_levels
-
-        if not song_instruments:
-            no_instruments += 1
-            continue
 
         songs[song_path] = {
             'song_path': song_path,
@@ -302,12 +254,12 @@ def build_cache(search_path=None, header=None, out_dir=None):
 
     # terminal report
     print(f"\n{header} cache complete:")
-    print(f"    Song.ini count        {len(ini_rows) - len(sng_ini_rows) - len(rb3con_ini_rows) - len(dta_ini_rows)}")
-    if scan.get('sng'):
+    print(f"    Song.ini count        {folder_ini_count}")
+    if scan['sng']:
         print(f"    .sng count            {len(scan['sng'])}")
-    if scan.get('rb3con'):
+    if scan['rb3con']:
         print(f"    rb3con count          {len(scan['rb3con'])} ({len(rb3con_ini_rows)} songs)")
-    if scan.get('dta'):
+    if scan['dta']:
         print(f"    songs.dta count       {len(scan['dta'])} ({len(dta_ini_rows)} songs)")
     if scan['no_ini_folders']:
         print(f"    Chart/mid, no ini     {scan['no_ini_folders']}")

@@ -96,19 +96,12 @@ CHART_BASE_SECTIONS = {
     'vocals': [],  # .chart has no vocals - required to prevent errors
 }
 
-# .chart level-name prefix per level
-CHART_LEVEL_PREFIX = {
-    'expert': 'Expert',
-    'hard':   'Hard',
-    'medium': 'Medium',
-    'easy':   'Easy',
-}
-
 # CHART_SECTIONS[instrument_key][level_key] -> ordered list of section names to try,
 # e.g. CHART_SECTIONS['bass']['hard'] == ['HardDoubleBass', 'HardSingleBass']
+# the .chart level prefix is the level's display name (Expert/Hard/Medium/Easy)
 CHART_SECTIONS = {
     instrument_key: {
-        level_key: [f'{CHART_LEVEL_PREFIX[level_key]}{base}' for base in bases]
+        level_key: [f'{LEVEL_DISPLAY_NAMES[level_key]}{base}' for base in bases]
         for level_key in LEVEL_KEYS
     }
     for instrument_key, bases in CHART_BASE_SECTIONS.items()
@@ -150,6 +143,9 @@ LEVEL_CODE_SUFFIX = {
 }
 SUFFIX_TO_LEVEL = {suffix: key for key, suffix in LEVEL_CODE_SUFFIX.items()}
 
+# lane-mask bit for an open note, shared by the mid and chart parsers (bits 0-4 are GRBYO)
+OPEN_BIT = 7
+
 # Keys has no mechanically reasonable open notes
 # Drums has no open-note (kick replaces), defensive exclusion
 SUPPORTS_OPEN_NOTES = {
@@ -171,11 +167,6 @@ SHEET_GROUPS = {
     'Vocals': ['vocals'],
     'Band':   ['band'],
 }
-
-# must match the 'Drums'/'Vocals'/'Band' keys in SHEET_GROUPS above
-DRUMS_SHEET_NAME = 'Drums'
-VOCALS_SHEET_NAME = 'Vocals'
-BAND_SHEET_NAME = 'Band'
 
 # --------------------------------------------------------------------------
 # Sheet profiles - one record per xlsx tab shape
@@ -269,16 +260,16 @@ _DRUM_PROFILE = SheetProfile(DRUM_COLUMN_ORDER, DRUM_HIDDEN_COLS, DRUM_FLOAT_COL
 _VOCAL_PROFILE = SheetProfile(VOCAL_COLUMN_ORDER, VOCAL_HIDDEN_COLS, VOCAL_FLOAT_COLS, VOCAL_SCALED_COLS, 'D')
 _BAND_PROFILE = SheetProfile(BAND_COLUMN_ORDER, BAND_HIDDEN_COLS, BAND_FLOAT_COLS, BAND_SCALED_COLS, 'CalcBandTier')
 
-# every sheet in SHEET_GROUPS gets a profile
+# one profile per sheet - keys must match SHEET_GROUPS above
 SHEET_PROFILES = {
-    sheet_name: (
-        _DRUM_PROFILE if sheet_name == DRUMS_SHEET_NAME
-        else _VOCAL_PROFILE if sheet_name == VOCALS_SHEET_NAME
-        else _BAND_PROFILE if sheet_name == BAND_SHEET_NAME
-        else _FRET_PROFILE
-    )
-    for sheet_name in SHEET_GROUPS
+    'Guitar': _FRET_PROFILE,
+    'Bass':   _FRET_PROFILE,
+    'Keys':   _FRET_PROFILE,
+    'Drums':  _DRUM_PROFILE,
+    'Vocals': _VOCAL_PROFILE,
+    'Band':   _BAND_PROFILE,
 }
+assert SHEET_PROFILES.keys() == SHEET_GROUPS.keys(), "SHEET_PROFILES and SHEET_GROUPS must name the same sheets"
 
 # per-row label for 'Type' column
 TYPE_LABELS = {

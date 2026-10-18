@@ -88,7 +88,7 @@ def calc_tier(D):
         return 0
     return int(math.floor(math.log(D / BASE_D) / LN_INC) + 1)
 
-# D Formula - N/V/COV/D, instrument-agnostic 
+# D Formula - N/V/COV/D, instrument-agnostic
 def calc_nvcov(metrics):
     pNPS, medNPS, aNPS, stdNPS = metrics['pNPS'], metrics['medNPS'], metrics['aNPS'], metrics['stdNPS']
     pVPS, medVPS, aVPS, stdVPS = metrics['pVPS'], metrics['medVPS'], metrics['aVPS'], metrics['stdVPS']
