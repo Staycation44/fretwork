@@ -22,13 +22,20 @@ That chart becomes its own song entry, so no chart from either file is ever drop
 
 METADATA:
     Name/Artist  - (name ...) / (artist ...); GH2 customs nest a {do {set $var ...}} block inside artist, skipped here
-    Charter      - GH2 customs' {set $author ...} where present, else 'unk'
+    Charter      - GH2 customs' {set $author ...} where present, else the pack's local author table, else 'unk'
     Release      - GH2 customs' {set $songorigin ...} where present else Custom
-    Official     - True only when $author is exactly one official studio (OFFICIAL_AUTHORS) else FALSE
+    Official     - True only when the author is exactly one official studio (OFFICIAL_AUTHORS) else FALSE
+                   ("Harmonix, mariteaux" is a DX-modified chart, so it isn't Official)
     Difficulty   - RB-style (rank ...) blocks map exactly as rb3con does / GH2 packs have none so they stay blank
+
+AUTHORS: GH2DX convention keeps on-disc authors in locale_authors.dta
+Found the same way as MIDI paths (DTA folder, then its parents), read once per pack in pack_tasks
+A pack without one (vanilla GH2, Onyx DIY, RB packs) just has no table - nothing is logged
+An entry's own {set $author ...} wins over the table, since it's specific to that song definition
 
 GH2 MIDI reference: https://thenathannator.github.io/GuitarGame_ChartFormats/Implementation-Specific/Guitar-Hero-1-and-2/MIDI-Tracks/Guitar/
 GH2 songs.dta reference: https://mariteaux.somnolescent.net/modding/guitar-hero/tutorials/adding-new-song-definitions/
+GH2DX locale_authors.dta: https://github.com/Milohax-archive/Guitar-Hero-II-Deluxe/blob/2.0/_ark/ui/eng/locale_authors.dta
 """
 
 import concurrent.futures as cf
@@ -37,6 +44,7 @@ import pathlib
 
 import tqdm
 
+from functions import library_walk
 from parsers import dta, ini_parser, mid_parser, rb3con_parser
 
 DTA_FILENAME = 'songs.dta'
@@ -50,6 +58,11 @@ OFFICIAL_AUTHORS = {
 
 # how many folders above songs.dta to try as the pack root (config/ -> pack root is 1 up)
 ROOT_SEARCH_DEPTH = 3
+
+# locale author tables, relative to the pack root - English first, then any other language folder
+LOCALE_AUTHORS_REL = 'ui/eng/locale_authors.dta'
+LOCALE_AUTHORS_NAME = 'locale_authors.dta'
+LOCALE_AUTHOR_SUFFIX = '_author'
 
 
 class DtaPackError(ValueError):
@@ -124,16 +137,55 @@ def _fallback_midi(roots, song_id):
 
 
 # ------------------------
+# Locale author table (GH2DX)
+# ------------------------
+
+def _find_locale_authors(roots):
+    for root in roots:
+        found = _find_ci(root, LOCALE_AUTHORS_REL)
+        if found is not None:
+            return found
+    for root in roots:
+        ui = _find_ci(root, 'ui', want_dir=True)
+        if ui is None:
+            continue
+        for lang in sorted(p for p in ui.iterdir() if p.is_dir()):
+            found = library_walk.find_in_folder(lang, LOCALE_AUTHORS_NAME)
+            if found is not None:
+                return found
+    return None
+
+def parse_locale_authors(text):
+    authors = {}
+    for entry in dta.song_entries(dta.parse(text)):
+        key = entry[0].lower()
+        if not key.endswith(LOCALE_AUTHOR_SUFFIX) or len(entry) < 2 or not isinstance(entry[1], str):
+            continue
+        shortname = key[:-len(LOCALE_AUTHOR_SUFFIX)]
+        author = dta.decode_string([], entry[1]).strip()
+        if shortname and author:
+            authors.setdefault(shortname, author)
+    return authors
+
+def load_locale_authors(dta_path):
+    locale_path = _find_locale_authors(_candidate_roots(pathlib.Path(dta_path)))
+    if locale_path is None:
+        return {}, None
+    return parse_locale_authors(locale_path.read_bytes().decode('latin1')), locale_path
+
+
+# ------------------------
 # Song-level parsing
 # ------------------------
 
-def _song_meta(song_entry, song_path):
+def _song_meta(song_entry, song_path, locale_author=None):
     ini = rb3con_parser._difficulties_from_rank(song_entry)
     variables = dta.set_vars(song_entry)
 
     name = dta.decode_string(song_entry, dta.find_text(song_entry, 'name'))
     artist = dta.decode_string(song_entry, dta.find_text(song_entry, 'artist'))
-    charter = dta.decode_string(song_entry, variables.get('author'))
+    # the entry's own $author first, the pack's locale table second
+    charter = dta.decode_string(song_entry, variables.get('author')) or locale_author
     if name:
         ini['name'] = name
     if artist:
@@ -188,12 +240,13 @@ def _coop_variant(song_entry, roots, song_path, main_meta, main_midi):
 # One song entry within a pack -> (songs, song_errors), matching ini_parser/mid_parser's own output shapes
 #   songs:       [(meta_row, note_stream)] - the main chart, plus its co-op chart when it has its own MIDI
 #   song_errors: a failed co-op chart, logged without losing the main one
-def dta_song(dta_path, song_id, song_entry):
+# locale_author: this song's entry from the pack's locale_authors.dta, if the pack has one
+def dta_song(dta_path, song_id, song_entry, locale_author=None):
     dta_path = pathlib.Path(dta_path)
     song_path = f"{dta_path}::{song_id}"
     roots = _candidate_roots(dta_path)
 
-    meta_row = _song_meta(song_entry, song_path)
+    meta_row = _song_meta(song_entry, song_path, locale_author)
 
     song_block = dta.find(song_entry, 'song') or []
     main_midi = _resolve_block_midi(roots, song_block) or _fallback_midi(roots, song_id)
@@ -214,11 +267,22 @@ def dta_song(dta_path, song_id, song_entry):
     return songs, song_errors
 
 
-# songs.dta -> (tasks, errors): one (dta_path, song_id, entry) task per song entry
+# songs.dta -> (tasks, errors): one (dta_path, song_id, entry, locale_author) task per song entry
+# the locale author table is read here once per pack, not once per song in the workers
 def pack_tasks(dta_path):
     dta_path = pathlib.Path(dta_path).resolve()
     text = dta_path.read_bytes().decode('latin1')
     tasks, errors, seen = [], [], set()
+
+    try:
+        locale_authors, _locale_path = load_locale_authors(dta_path)
+    except Exception as exc:
+        # a broken table only costs Charter - the pack's songs still load
+        locale_authors = {}
+        errors.append((str(dta_path), 'LocaleAuthorsError',
+                       f"locale_authors.dta unreadable, Charter falls back to $author/unk: "
+                       f"{type(exc).__name__}: {exc}"))
+
     for entry in dta.song_entries(dta.parse(text)):
         song_id = entry[0]
         if dta.find(entry, 'song') is None or dta.find(entry, 'validate_ignore') is not None:
@@ -228,7 +292,7 @@ def pack_tasks(dta_path):
                            "shortname defined more than once in this songs.dta - first definition used"))
             continue
         seen.add(song_id)
-        tasks.append((str(dta_path), song_id, entry))
+        tasks.append((str(dta_path), song_id, entry, locale_authors.get(song_id.lower())))
     if not tasks:
         raise DtaPackError(f"{dta_path}: no song definitions found")
     return tasks, errors
@@ -239,7 +303,7 @@ def pack_tasks(dta_path):
 # -----------
 
 def _dta_song_worker(task):
-    dta_path, song_id, _entry = task
+    dta_path, song_id = task[0], task[1]
     try:
         return dta_song(*task), None
     except Exception as exc:
@@ -258,7 +322,7 @@ def dta_loop(search_path, errors=None, max_workers=None, files=None):
     note_index = {}
 
     if files is None:
-        files = [p for p in pathlib.Path(search_path).rglob("*") if p.is_file() and is_dta_pack_filename(p.name)]
+        files = list(library_walk.library_files(search_path, is_dta_pack_filename))
 
     tasks = []
     for file in files:

@@ -4,8 +4,8 @@ RB3CON_PARSER - Reads RB3 STFS packages into the same metadata-row / note-stream
 STFS block-address math (_fix_blocknum/_get_blockhash) is adapted from arkem/py360: https://github.com/arkem/py360
 whose own credited source is the Free60 project's STFS documentation: https://free60.org/System-Software/Formats/STFS/
 
-Only the .mid and songs.dta entries inside a song's folder are ever read 
-.mogg (audio) is never opened & often encrypted
+Only the .mid and songs.dta entries inside a song's folder are ever read
+.mogg (audio) is never opened & often encrypted anyway
 
 DTA metadata (songs.dta) reference: https://rock-band-customs.gitlab.io/authoring-dtas.html
 DTA text parsing lives in parsers/dta.py (shared with dta_parser)
@@ -30,7 +30,7 @@ import struct
 
 import tqdm
 
-from functions import instruments
+from functions import instruments, library_walk
 from parsers import dta, ini_parser, mid_parser
 
 STFS_MAGICS = (b'CON ', b'LIVE', b'PIRS')
@@ -386,7 +386,7 @@ def rb3con_loop(search_path, errors=None, max_workers=None, files=None):
     note_index = {}
 
     if files is None:
-        files = [p for p in pathlib.Path(search_path).rglob("*") if p.is_file() and is_rb3con_file(p)]
+        files = [p for p in library_walk.library_files(search_path, lambda name: True) if is_rb3con_file(p)]
 
     if not files:
         return ini_rows, note_index

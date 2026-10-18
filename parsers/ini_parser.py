@@ -11,7 +11,7 @@ import re
 
 import tqdm
 
-from functions import instruments
+from functions import instruments, library_walk
 from parsers.text_decode import read_text
 
 # --------------
@@ -128,7 +128,7 @@ def ini_metadata(file):
 def ini_loop(search_path, errors=None, files=None):
     ini_out = {}
     if files is None:
-        files = list(pathlib.Path(search_path).rglob("song.ini"))
+        files = list(library_walk.library_files(search_path, library_walk.name_is("song.ini")))
 
     for file in tqdm.tqdm(files, desc="Gathering ini data", unit="file"):
         try:

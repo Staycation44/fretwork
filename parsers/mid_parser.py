@@ -34,7 +34,7 @@ NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are disc
 
 Only note_on is read (besides vocals) - note_off/velocity-0 messages are ignored, since note length isn't used by any metric.
 
-NOT PARSED: star power and solo phrases, SysEx-based open notes (0x01), 
+NOT PARSED: star power and solo phrases, SysEx-based open notes (0x01),
 and GH1/2-style legacy open notes (pitch 0 on a specific channel)
 
 ===5 FRET===
@@ -59,7 +59,7 @@ import mido
 import numpy as np
 import tqdm
 
-from functions import instruments
+from functions import instruments, library_walk
 from parsers.timing import clean_tempos, tempo_map, ticks_to_ms
 from parsers.vocal_parser import _extract_vocal_track
 
@@ -94,7 +94,7 @@ for _level_key, _base in instruments.MID_PITCH_BASE.items():
 DRUM_PITCH_TO_INFO[instruments.MID_PITCH_BASE['expert'] - 1] = ('expert', '2xkick')
 del _level_key, _base, _lane
 
-# Roll lane special phrase types: S <type> <length> 
+# Roll lane special phrase types: S <type> <length>
 # can't overcount these because of the charted notes vs actual implication for difficulty
 DRUM_ROLL_PITCH_TO_KIND = {126: 'single', 127: 'double'}
 DRUM_ROLL_HARD_VELOCITY_RANGE = range(41, 51)  # 41-50 inclusive
@@ -407,7 +407,7 @@ def mid_loop(search_path, errors=None, max_workers=None, files=None):
     mid_out = {}
 
     if files is None:
-        files = list(pathlib.Path(search_path).rglob("notes.mid"))
+        files = list(library_walk.library_files(search_path, library_walk.name_is("notes.mid")))
 
     if not files:
         return mid_out

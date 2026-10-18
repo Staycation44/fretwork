@@ -9,10 +9,13 @@ Additionally backs up every song's original diff_* values w/ instrument columns 
 Existing backup rows are never overwritten - only their blank cells get filled from the current song.ini
 (Analyze never writes to a blank cell, so a blank cell still holds the original)
 
-The library is walked once: 
- - song.ini / notes.chart / notes.mid combinations built out by the parsers 
+The library is walked once:
+ - song.ini / notes.chart / notes.mid combinations built out by the parsers
  - .sng / rb3con containers are unpacked in memory and reshaped to go into the cache
  - loose songs.dta packs (unpacked GH2 ARKs, Onyx DIY folders) are read song by song from the .dta + each song's .mid
+
+The walk follows symlinked/junctioned folders, each real folder visited once (see library_walk),
+and matches song.ini / notes.* names case-insensitively on every platform
 
 folders with a chart/mid but no song.ini plus unsupported .yargsong files are counted in the report
 
@@ -31,16 +34,17 @@ import pathlib
 
 import config
 from functions import instruments, ini_updater, timestamp
+from functions import library_walk
 from parsers import chart_parser, dta_parser, ini_parser, mid_parser, rb3con_parser, sng_parser
 from functions import cache as cache_mod
 
 # The ini columns that survive to the metrics spreadsheet, aside from per-instrument Difficulty
 META_KEYS = ('Name', 'Artist', 'Charter', 'Release', 'Official')
 
-# names matched the way the file system does
-_INI_NAME = os.path.normcase("song.ini")
-_CHART_NAME = os.path.normcase("notes.chart")
-_MID_NAME = os.path.normcase("notes.mid")
+# names matched case-insensitively on every platform (Linux included)
+_INI_NAME = "song.ini"
+_CHART_NAME = "notes.chart"
+_MID_NAME = "notes.mid"
 
 # .sng (Clone Hero container)
 SNG_EXTS = ('.sng',)
@@ -55,9 +59,9 @@ def scan_library(search_path):
     unsupported = {ext: 0 for ext in UNSUPPORTED_EXTS}
     ini_dirs, note_dirs = set(), set()
 
-    for dirpath, _dirnames, filenames in os.walk(search_path):
+    for dirpath, _dirnames, filenames in library_walk.walk_library(search_path):
         for name in filenames:
-            key = os.path.normcase(name)
+            key = name.lower()
             if key == _INI_NAME:
                 ini_files.append(pathlib.Path(dirpath, name))
                 ini_dirs.add(dirpath)
@@ -105,10 +109,10 @@ def build_note_index(search_path, errors, scan=None):
     scan = scan or {}
     mid_files = scan.get('mid')
     if mid_files is None:
-        mid_files = list(pathlib.Path(search_path).rglob("notes.mid"))
+        mid_files = list(library_walk.library_files(search_path, library_walk.name_is(_MID_NAME)))
     chart_files = scan.get('chart')
     if chart_files is None:
-        chart_files = list(pathlib.Path(search_path).rglob("notes.chart"))
+        chart_files = list(library_walk.library_files(search_path, library_walk.name_is(_CHART_NAME)))
 
     mid_streams = mid_parser.mid_loop(search_path, errors, max_workers=config.PARSE_MAX_WORKERS,
                                       files=mid_files)

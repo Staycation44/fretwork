@@ -53,7 +53,7 @@ import pathlib
 import numpy as np
 import tqdm
 
-from functions import instruments
+from functions import instruments, library_walk
 from parsers.text_decode import read_text
 from parsers.timing import clean_tempos, tempo_map, ticks_to_ms
 
@@ -69,7 +69,7 @@ DRUM_KICK_NOTE = 0
 DRUM_2X_KICK_NOTE = 32
 DRUM_HAND_NOTES = {1, 2, 3, 4, 5}
 
-# Roll lane special phrase types: S <type> <length> 
+# Roll lane special phrase types: S <type> <length>
 # can't overcount these because of the charted notes vs actual implication for difficulty
 DRUM_ROLL_TYPE_TO_KIND = {65: 'single', 66: 'double'}
 
@@ -378,7 +378,7 @@ def chart_loop(search_path, errors=None, max_workers=None, files=None):
     chart_out = {}
 
     if files is None:
-        files = list(pathlib.Path(search_path).rglob("notes.chart"))
+        files = list(library_walk.library_files(search_path, library_walk.name_is("notes.chart")))
 
     if not files:
         return chart_out

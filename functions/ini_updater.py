@@ -8,6 +8,8 @@ preserving everything else in the file byte-for-byte (encoding, BOM/byte order, 
     - every occurrence of a key is updated (the parser reads the last duplicate, the game may read either)
     - keys that don't exist yet are added at the end of [song], a value of None removes the key
     - files are only rewritten when something actually changed, via a temp file + os.replace
+    - a symlinked song.ini is written through to its target, the link itself is left in place
+    - song.ini is found case-insensitively (Song.ini / SONG.INI on Linux)
 
 The backup CSV lives with the cache files:
     - one row per song, one column per instrument's diff_* tag
@@ -21,7 +23,7 @@ import os
 import pathlib
 import shutil
 
-from functions import instruments, timestamp
+from functions import instruments, library_walk, timestamp
 
 # backup CSV columns: song_path + one column per instrument's actual ini tag name
 BACKUP_COLUMNS = ["song_path"] + list(instruments.DIFF_TAGS.values())
@@ -31,8 +33,10 @@ VALID_MODES = ("CalcTier", "RemapDiff", "Restore")
 MISSING = "missing"
 
 # song folder -> its song.ini, joined by pathlib so the separator matches song_path's
+# matched case-insensitively
 def song_ini_path(song_path):
-    return pathlib.Path(song_path) / "song.ini"
+    folder = pathlib.Path(song_path)
+    return library_walk.find_in_folder(folder, "song.ini") or folder / "song.ini"
 
 
 # .sng songs are keyed by the container file itself
@@ -81,7 +85,7 @@ def _read_text(file):
 # temp file in the same folder + os.replace, so an interrupted write never truncates song.ini
 def _write_text(file, text, codec):
     name, bom, errors = codec
-    file = pathlib.Path(file)
+    file = pathlib.Path(file).resolve()
     tmp = file.with_name(file.name + ".fretwork.tmp")
     try:
         tmp.write_bytes(bom + text.encode(name, errors=errors))

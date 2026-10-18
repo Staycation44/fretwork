@@ -1,5 +1,5 @@
 """
-SNG_PARSER - Reads .sng container files into the same metadata-row / note-stream shapes build.py 
+SNG_PARSER - Reads .sng container files into the same metadata-row / note-stream shapes build.py expects
 
 .yargsong is intentionally not implemented
 
@@ -9,8 +9,6 @@ Only notes.mid / notes.chart are read out of a container - notes.mid preferred, 
 there's no midi or it fails to parse (same rule build.py applies to song folders)
 
 .SNG spec: https://github.com/mdsitton/SngFileFormat
-
-This just unpacks bytes for the parsers
 """
 
 import concurrent.futures as cf
@@ -21,6 +19,7 @@ import struct
 import numpy as np
 import tqdm
 
+from functions import library_walk
 from parsers import chart_parser, ini_parser, mid_parser
 from parsers.text_decode import decode_text
 
@@ -144,7 +143,7 @@ def _read_sng(path):
 # Song-level parsing
 # -------------------
 
-# Parses one .sng into (meta_row, note_stream) 
+# Parses one .sng into (meta_row, note_stream)
 # matches ini_parser/mid_parser/chart_parser output
 # song_path is the container's resolved path
 def sng_song(path):
@@ -223,9 +222,7 @@ def sng_loop(search_path, errors=None, max_workers=None, files=None):
     note_index = {}
 
     if files is None:
-        files = []
-        for ext in SNG_EXTENSIONS:
-            files.extend(pathlib.Path(search_path).rglob(f"*{ext}"))
+        files = list(library_walk.library_files(search_path, library_walk.ext_in(SNG_EXTENSIONS)))
 
     if not files:
         return ini_rows, note_index
