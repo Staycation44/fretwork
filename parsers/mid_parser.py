@@ -31,11 +31,14 @@ Tempo: zero/invalid set_tempo messages are skipped and logged to the build error
 and 120 BPM is assumed before the first tempo marker (see timing.clean_tempos)
 
 NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
+NOT PARSED: star power and solo phrases, and GH1/2-style legacy open notes (pitch 0 on a specific channel)
 
 Only note_on is read (besides vocals) - note_off/velocity-0 messages are ignored, since note length isn't used by any metric.
 
-NOT PARSED: star power and solo phrases, SysEx-based open notes (0x01),
-and GH1/2-style legacy open notes (pitch 0 on a specific channel)
+REPAIR: a file mido can't read is rewritten by mid_repair.py and read again, with a MidiRepaired build warning
+A file with running status straight after a SysEx is repaired before mido reads it since mido can misread that without raising 
+
+SYSEX OPEN NOTES: Phase Shift SysEx open phrases (0x01) are read the way YARG.Core and Moonscraper do
 
 ===5 FRET===
 .mid encodes level as a pitch block within one track per instrument
@@ -56,7 +59,7 @@ import pathlib
 import mido
 
 from functions import instruments
-from parsers import pool, timing, vocal_parser
+from parsers import mid_repair, pool, timing, vocal_parser
 
 # ---------------------------------------------------------------------
 # Mid-specific constants
@@ -76,6 +79,16 @@ OPEN_PITCH_TO_LEVEL = {
 }
 
 ENH_OPEN = 'ENHANCED_OPENS'
+
+# Phase Shift SysEx (YARG.Core PhaseShiftSysEx.cs): 'P' 'S' 0x00, type 0x00 (phrase), <difficulty>,
+# <code>, <value>; mido drops the F0/F7, leaving exactly 7 data bytes
+# difficulty 0xFF is every level - mido, reading with clip=True, delivers it as 0x7F, so both are accepted
+PS_HEADER = (0x50, 0x53, 0x00, 0x00)
+PS_LENGTH = 7
+PS_DIFFICULTY_TO_LEVEL = {0: 'easy', 1: 'medium', 2: 'hard', 3: 'expert'}
+PS_EVERY_LEVEL = 0xFF
+PS_OPEN = 0x01
+PS_START, PS_END = 0x01, 0x00
 
 # Drum pitch -> (level_key, slot) where slot is 'kick', '2xkick', or a hand_mask bit index (0-4)
 # 4 + 5 lane supported (5 lane is just an extra note)
@@ -120,6 +133,34 @@ def _mid_tempos(mid):
 # Note-stream extraction
 # -----------------------
 
+# Phase Shift SysEx open start/end -> (difficulty, start_tick, end_tick) appended to open_spans
+# pairing as YARG.Core MidReader.ProcessSysExEvent: by difficulty byte, a duplicate start is ignored
+def _ps_open_event(data, abs_tick, open_since, open_spans):
+    if len(data) != PS_LENGTH or tuple(data[:4]) != PS_HEADER or data[5] != PS_OPEN:
+        return
+    difficulty = PS_EVERY_LEVEL if data[4] == 0x7F else data[4]
+    if data[6] == PS_START:
+        open_since.setdefault(difficulty, abs_tick)
+    elif data[6] == PS_END and difficulty in open_since:
+        open_spans.append((difficulty, open_since.pop(difficulty), abs_tick))
+
+
+# open phrase spans -> {level_key: [(first tick, last tick)]}, last tick inclusive (end tick excluded)
+def _ps_open_ranges(open_spans):
+    ranges = {level_key: [] for level_key in instruments.LEVEL_KEYS}
+    for difficulty, start, end in open_spans:
+        last = end - 1 if end > start else end
+        if difficulty == PS_EVERY_LEVEL:
+            levels = instruments.LEVEL_KEYS
+        elif difficulty in PS_DIFFICULTY_TO_LEVEL:
+            levels = [PS_DIFFICULTY_TO_LEVEL[difficulty]]
+        else:
+            continue
+        for level_key in levels:
+            ranges[level_key].append((start, last))
+    return ranges
+
+
 # Extracts one instrument's note stream from its located track, split into per-EMHX-level lane masks from one scan
 # Returns None if the track has no usable notes at any level
 def _extract_track(track, instrument_key, to_ms_array):
@@ -128,6 +169,8 @@ def _extract_track(track, instrument_key, to_ms_array):
 
     masks_by_tick = {level_key: {} for level_key in instruments.LEVEL_KEYS}
     pending_opens = []   # (abs_tick, level_key) - applied only if ENHANCED_OPENS turns up
+    ps_open_since = {}   # difficulty byte -> start tick of a SysEx open phrase still on
+    ps_open_spans = []   # (difficulty byte, start tick, end tick)
     abs_tick = 0
 
     for msg in track:
@@ -149,11 +192,23 @@ def _extract_track(track, instrument_key, to_ms_array):
         elif msg.type == 'text' and ENH_OPEN in msg.text.upper():
             enhanced_opens = True
 
+        elif allow_opens and msg.type == 'sysex':
+            _ps_open_event(msg.data, abs_tick, ps_open_since, ps_open_spans)
+
     # Note-based only if the track has ENHANCED_OPENS
     if allow_opens and enhanced_opens:
         for open_tick, level_key in pending_opens:
             level_masks = masks_by_tick[level_key]
             level_masks[open_tick] = level_masks.get(open_tick, 0) | (1 << instruments.OPEN_BIT)
+
+    # SysEx opens: every note in an open phrase becomes a single open note (see module docstring)
+    if allow_opens and ps_open_spans:
+        open_mask = 1 << instruments.OPEN_BIT
+        for level_key, ranges in _ps_open_ranges(ps_open_spans).items():
+            level_masks = masks_by_tick[level_key]
+            for tick, mask in level_masks.items():
+                if mask != open_mask and any(first <= tick <= last for first, last in ranges):
+                    level_masks[tick] = open_mask
 
     levels_out = {
         level_key: {'notes': timing.masks_to_stream(level_masks, to_ms_array)}
@@ -256,22 +311,45 @@ def mid_notes(mid_source):
     return mid_notes_from_bytes(pathlib.Path(mid_source).read_bytes(), song_path, warn_label=str(mid_source))
 
 
-# midi bytes -> note stream, shared by notes.mid on disk and midis embedded in containers
+# bytes -> mido.MidiFile, read from mid_repair's rewrite when the original would be misread
+# returns (mid, repair notes or None)
+#   - running status straight after a SysEx: mido reads the next bytes as another SysEx and can
+#     misread the rest of the track without raising, so it's repaired up front, not on failure
+#   - anything else mido can't read: repaired and read again
 # mido raises a blank EOFError()/OSError() on a truncated or corrupt file, so the size is added to help troubleshoot
+def _read_midi(data):
+    if mid_repair.sysex_carries(data):
+        fixed, repaired = mid_repair.repair(data)
+        return mido.MidiFile(file=io.BytesIO(fixed), clip=True), repaired
+    try:
+        return mido.MidiFile(file=io.BytesIO(data), clip=True), None
+    except (EOFError, OSError, ValueError, KeyError, IndexError) as exc:
+        try:
+            fixed, repaired = mid_repair.repair(data)
+            return mido.MidiFile(file=io.BytesIO(fixed), clip=True), repaired
+        except Exception:
+            if type(exc) not in (EOFError, OSError):
+                raise exc
+            raise type(exc)(
+                f"{len(data)}-byte file - corrupt or truncated midi ({type(exc).__name__} from mido)"
+            ) from exc
+
+
+# midi bytes -> note stream, shared by notes.mid on disk and midis embedded in containers
 def mid_notes_from_bytes(data, song_path, warn_label=None):
     warn_label = warn_label if warn_label is not None else song_path
-    try:
-        mid = mido.MidiFile(file=io.BytesIO(data), clip=True)
-    except (EOFError, OSError) as exc:
-        if type(exc) not in (EOFError, OSError):
-            raise
-        raise type(exc)(
-            f"{len(data)}-byte file - corrupt or truncated midi ({type(exc).__name__} from mido)"
-        ) from exc
+    mid, repaired = _read_midi(data)
 
     tick_res = mid.ticks_per_beat
     tempos, dropped = _mid_tempos(mid)
     to_ms_array, warnings = timing.converter(tempos, tick_res, warn_label, dropped)
+
+    def warn(kind, message):
+        warnings.append((warn_label, kind, message))
+
+    if repaired is not None:
+        warn('MidiRepaired', "read after repair (mido can't read the file as written, or would misread it): "
+             + ("; ".join(repaired) or "events rewritten with explicit status bytes"))
 
     track_map = {t.name.strip(): t for t in mid.tracks if t.name}
 
