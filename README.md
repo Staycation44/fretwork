@@ -23,7 +23,7 @@ Optionally, applies calculated difficulty to `song.ini` files for use in-game, o
 - [2. Building a cache](#2-building-a-cache)
 - [3. Analyzing a cache](#3-analyzing-a-cache)
 - [4. Rendering song graphs](#4-rendering-song-graphs)
-- [5. Fixes/Extension Ideas](#5-fixesextension-ideas)
+- [5. Extension Ideas](#5-extension-ideas)
 - [Third-Party Attributions](#third-party-attributions)
 - [License](#license)
 
@@ -54,8 +54,6 @@ ex. `Library_cache_08052026-0330.pkl`, `Library_metrics_08052026-0330.xlsx`.
 `build.py` walks `SEARCH_PATH`, finds every `song.ini`, `notes.chart`, and `notes.mid` (now supports `.sng`, `rb3con`, and unpacked `ARKs` with associated `songs.dta` as well), reads them, and writes one cache file containing every song's note timing and metadata. A CSV containing per instrument original difficulties is also saved.
 
 By default this will run on the `SEARCH_PATH` & `HEADER` set in the config.
-
-**If you ran a prior version, you will need to rebuild your cache**
 
 **Outputs in `/caches` folder:**
 
@@ -108,13 +106,6 @@ In the metrics spreadsheet / render header, you'll see D translated two ways:
 - `Restore` always restores every instrument and ignores overrides
 - An unknown mode or instrument key stops Analyze before anything runs
 
-**How writes stay safe:**
-- A value is only written where `{header}_BackupData.csv` already holds that song/instrument's original, anything else is reported as `not backed up (skipped)`
-- Values that match the write aren't rewritten, so repeat runs report them as `unchanged`
-- Band is only written for songs with a Band row (2+ core instruments with an Expert D)
-
-> **Upgrading from an earlier version:** Build now fills blank backup cells (e.g. the `diff_vocals` column added with Vocals) from the current `song.ini`. If you already wrote Vocals difficulties with an earlier version, those written values will be captured as the "original". Restore first with the old version before rebuilding.
-
 **Note: After updating `song.ini` data, you MUST SCAN SONGS for the new metadata to work.**
 
 ---
@@ -164,9 +155,7 @@ Graphs are available in light or dark mode depending on the config.
 
 ---
 
-## 5. Fixes/Extension Ideas
-**Fixes:**
-- Midi files misbehaving - *possibly parser drift / file corrruption/truncation?*
+## 5. Extension Ideas
 
 **Extension Ideas:**
 - Vocal harmonies (`HARM1`-`HARM3`)
