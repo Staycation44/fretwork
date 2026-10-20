@@ -163,7 +163,7 @@ def _ps_open_ranges(open_spans):
 
 # Extracts one instrument's note stream from its located track, split into per-EMHX-level lane masks from one scan
 # Returns None if the track has no usable notes at any level
-def _extract_track(track, instrument_key, to_ms_array, warn=None):
+def _extract_track(track, instrument_key, to_ms_array):
     allow_opens = instruments.SUPPORTS_OPEN_NOTES[instrument_key]
     enhanced_opens = False
 
@@ -204,15 +204,11 @@ def _extract_track(track, instrument_key, to_ms_array, warn=None):
     # SysEx opens: every note in an open phrase becomes a single open note (see module docstring)
     if allow_opens and ps_open_spans:
         open_mask = 1 << instruments.OPEN_BIT
-        converted = 0
         for level_key, ranges in _ps_open_ranges(ps_open_spans).items():
             level_masks = masks_by_tick[level_key]
             for tick, mask in level_masks.items():
                 if mask != open_mask and any(first <= tick <= last for first, last in ranges):
                     level_masks[tick] = open_mask
-                    converted += 1
-        if converted and warn is not None:
-            warn('SysExOpen', f"{instrument_key}: {converted} notes read as SysEx open notes")
 
     levels_out = {
         level_key: {'notes': timing.masks_to_stream(level_masks, to_ms_array)}
@@ -372,7 +368,7 @@ def mid_notes_from_bytes(data, song_path, warn_label=None):
         levels = (
             _extract_drum_track(track, to_ms_array) if instrument_key == 'drums'
             else vocal_parser.extract_vocal_track(track, to_ms_array) if instrument_key == 'vocals'
-            else _extract_track(track, instrument_key, to_ms_array, warn)
+            else _extract_track(track, instrument_key, to_ms_array)
         )
         if levels is not None:
             instruments_out[instrument_key] = levels
