@@ -2,7 +2,7 @@
 RENDER - one PNG per retrieval code based on settings in config + plot
 
 Takes codes from the ANALYZE spreadsheet and writes an individual PNG for each.
-Codes are an 8-digit hash + level (E/M/H/X) + instrument (G/C/R/B/K/D/V)
+Codes are an 8-digit hash + level (E/M/H/X) + instrument (G/C/R/B/K/D/V/H)
 
     python render.py 04821993XG
     python render.py 04821993XG 71620045HB 09933120EK
@@ -22,7 +22,10 @@ EMHX
 Different instruments require different functions
 
 Drums renders 2x under 1x when both appear for a chart
+
 Vocals are Expert-only, so no EMHX anchor step - RemapDiff/CalcTier come straight from D
+A song with harmonies renders Lead + Harmonies stacked whichever vocal code is used (XV or XH)
+
 """
 
 import argparse
@@ -32,7 +35,7 @@ import tqdm
 
 import config
 from formulas import drum_density, drum_formula, fret_density, fret_formula, vocal_density, vocal_formula
-from functions import anchors, cache as cache_mod, curves, ini_updater, plot, timestamp
+from functions import anchors, cache as cache_mod, curves, ini_updater, instruments, plot, timestamp
 
 
 # One guitar/bass/keys entry - Expert metrics reused when this entry is the Expert level
@@ -89,22 +92,57 @@ def _render_drum_entry(entry, out_dir, original_diffs):
     return path, None
 
 
-# One vocals entry - Expert only, no EMHX anchoring needed (RemapDiff/CalcTier come straight from D)
-def _render_vocal_entry(entry, out_dir, original_diffs):
-    talkie = entry.get('talkie')
-    percussion = entry.get('percussion')
+# one chart tag - 'Lead  D 36.22 | remap 5 | tier 6'
+def _panel_tag(name, d, extra=''):
+    return (f"{name}  D {d['D']:.2f}  |  remap {d['RemapDiff']}  |  tier {d['CalcTier']}{extra}")
 
-    windows = vocal_density.window_arrays(entry['notes'], talkie, percussion)
-    if windows is None:
+
+# One vocals or harmonies entry
+# Draws the Lead chart, plus a Harmonies chart under it when the song has harmonies, for either code
+def _render_vocal_entry(entry, out_dir, original_diffs):
+    song_instruments = entry.get('song_instruments') or {}
+    lead = song_instruments.get('vocals', {}).get('expert')
+    if lead is None and entry['instrument'] == 'vocals':
+        lead = entry
+    harmony_entry = song_instruments.get('harmonies', {}).get('expert')
+
+    lead_curves = lead_d = None
+    if lead is not None:
+        talkie, percussion = lead.get('talkie'), lead.get('percussion')
+        windows = vocal_density.window_arrays(lead['notes'], talkie, percussion)
+        if windows is not None:
+            metrics = vocal_density.calc_vocal_metrics(lead['notes'], talkie, percussion, windows=windows)
+            lead_d = vocal_formula.calc_vocal_d(metrics)
+            lead_curves = curves.calc_vocal_curves(lead['notes'], talkie, percussion=percussion,
+                                                   windows=windows, difficulty=lead_d)
+
+    harmony = harmony_curves = None
+    if harmony_entry is not None:
+        harmony = vocal_formula.calc_harmony_d(harmony_entry)
+        if harmony is not None:
+            harmony_curves = curves.calc_harmony_curves(harmony_entry, harmony)
+
+    if lead_curves is None and harmony_curves is None:
         return None, f"{entry['code']}: no curve data"
 
-    metrics = vocal_density.calc_vocal_metrics(entry['notes'], talkie, percussion, windows=windows)
-    difficulty = vocal_formula.calc_vocal_d(metrics)
-    vocal_curves = curves.calc_vocal_curves(entry['notes'], talkie, percussion=percussion,
-                                                windows=windows, difficulty=difficulty)
+    difficulty = lead_d if entry['instrument'] == 'vocals' else harmony
+    if difficulty is None:
+        return None, f"{entry['code']}: no curve data"
 
-    path = plot.render_vocal_song(entry, vocal_curves, difficulty,
-                                  original_diff=_original_diff(entry, original_diffs), out_dir=out_dir)
+    panel_labels = None
+    if harmony_curves is not None:
+        n = max(c['time_ms'].size for c in (lead_curves, harmony_curves) if c is not None)
+        lead_curves = curves.pad_curves(lead_curves, n)
+        harmony_curves = curves.pad_curves(harmony_curves, n)
+        hardest = instruments.HARMONY_PART_LABELS[harmony['hardest']]
+        panel_labels = {
+            'lead': _panel_tag('Lead', lead_d) if lead_d is not None else 'Lead',
+            'harmony': _panel_tag('Harmonies', harmony, f"  |  hardest {hardest}"),
+        }
+
+    path = plot.render_vocal_song(entry, lead_curves, difficulty,
+                                  original_diff=_original_diff(entry, original_diffs), out_dir=out_dir,
+                                  harmony_curves=harmony_curves, panel_labels=panel_labels)
     return path, None
 
 
@@ -117,6 +155,7 @@ def _original_diff(entry, original_diffs):
 RENDERERS = {
     'drums': _render_drum_entry,
     'vocals': _render_vocal_entry,
+    'harmonies': _render_vocal_entry,
 }
 
 

@@ -46,6 +46,8 @@ Shape:
                     #                             # - not read by vocal_density, which uses a fixed talkie length
                     #     },
                     #     'percussion': {'time_ms': ndarray, 'end_ms': ndarray},   # note 96 taps, render only
+                    # 'harmonies' entries are Expert only (2+ parts), one vocals-shaped entry per part
+                    #     'parts': {'harm1': {notes/talkie/percussion}, 'harm2': {...}, 'harm3': {...}},
                 },
                 'roll_spans': {'drums': {level_key: [(start_ms, end_ms, 'single'|'double'), ...], ...}},
                 # roll lanes available per level
@@ -60,8 +62,8 @@ Caches should be managed based on timestamp / generation time & date
 
 When generated with errors, a CSV is produced alongside the cache with details
 
-Retrieval codes are per the 8-digit song hash + a level (E/M/H/X) + instrument (G/C/R/B/K/D/V)
-'04821993' + Expert + Bass -> '04821993XB' 
+Retrieval codes are per the 8-digit song hash + a level (E/M/H/X) + instrument (G/C/R/B/K/D/V/H)
+'04821993' + Expert + Bass -> '04821993XB'
 Render uses the code to define the instrument/level
 
 Drums requires roll spans to calculate correctly so those are paired to the code as well
@@ -188,7 +190,6 @@ def entries_by_code(cache, codes):
             missing.append(raw)
             continue
 
-        # Expert's notes, alongside the requested level 
         # RemapDiff/CalcTier are anchored to Expert row's data
         expert_notes = instrument_levels.get('expert', {}).get('notes')
 
@@ -208,6 +209,7 @@ def entries_by_code(cache, codes):
             'expert_notes': expert_notes,
             'roll_spans': roll_spans,
             'expert_roll_spans': expert_roll_spans,
+            'song_instruments': song['instruments'] if instrument_key in ('vocals', 'harmonies') else None,
         })
 
     return entries, missing

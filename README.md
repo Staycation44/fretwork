@@ -77,7 +77,7 @@ Optionally, `analyze.py` can also update each instrument's `song.ini` `diff_*` t
 
 An .xlsx spreadsheet named `{header}_metrics_{timestamp}.xlsx` with:
 - **One tab per instrument group** that has data in the cache, filterable by `E`/`M`/`H`/`X` levels
-- **Retrieval codes** - an 8-digit song hash plus level(`E`/`M`/`H`/`X`) and instrument (`G`/`C`/`R`/`B`/`K`/`D`/`V`), ex. `04821993XG` for an Expert Guitar song
+- **Retrieval codes** - an 8-digit song hash plus level(`E`/`M`/`H`/`X`) and instrument (`G`/`C`/`R`/`B`/`K`/`D`/`V`/`H`), ex. `04821993XG` for an Expert Guitar song
 - **Metadata** - Song Title, Artist, Level, Type (Instrument), Charter, Release/Source, Difficulty (song.ini diff tags)
 - **D scores** & updated Remap/CalcTier numbers
 
@@ -158,7 +158,6 @@ Graphs are available in light or dark mode depending on the config.
 ## 5. Extension Ideas
 
 **Extension Ideas:**
-- Vocal harmonies (`HARM1`-`HARM3`)
 - Pro Instruments
 - Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
 - D by section + Section names for renders
@@ -178,7 +177,7 @@ Fretwork's own code is MIT-licensed (see below), but a few pieces of format docu
 
 | Source | Used for | License | Notes |
 |---|---|---|---|
-| [TheNathannator/ChartFormats](https://github.com/TheNathannator/GuitarGame_ChartFormats) | `.chart`/`.mid` track, section, and pitch-block details used throughout `instruments.py`, `mid_parser.py`, `chart_parser.py` | CC0 1.0 Universal | Reference |
+| [TheNathannator/ChartFormats](https://github.com/TheNathannator/GuitarGame_ChartFormats) | `.chart`/`.mid` track, section, and pitch-block details used throughout `instruments.py`, `mid_parser.py`, `chart_parser.py`, `vocal_parser.py` | CC0 1.0 Universal | Reference |
 | [mdsitton/SngFileFormat](https://github.com/mdsitton/SngFileFormat) | `.sng` container spec for `sng_parser.py` | MIT | Reference |
 | [Free60 project](https://free60.org/System-Software/Formats/STFS/) | STFS format details for `rb3con_parser.py` | ??? | Reference |
 | [Rock Band Customs Project](https://rock-band-customs.gitlab.io/authoring-dtas.html) | `songs.dta` field reference for `rb3con_parser.py` | ??? | Reference|

@@ -42,9 +42,15 @@ No Changes to STAM
 Vocals have no EMHX, so RemapDiff/CalcTier come straight from D
 
 RemapDiff & CalcTier calibrated for vocals - see Methodology.md for calibration data
+
+HARMONIES - same formula, same bins/CalcTier
+    every part (HARM1-3) gets its own D from the formula above
+    harmony D = the hardest part's D / also used for tiering
 """
 
 import math
+
+from formulas import vocal_density
 
 # ---------------------------------
 # Remap (0-6)
@@ -130,4 +136,28 @@ def calc_vocal_d(metrics):
         'D': D,
         'RemapDiff': remap_diff(D),
         'CalcTier': calc_tier(D),
+    }
+
+
+# ----------
+# HARMONIES
+# ----------
+
+def calc_harmony_d(harmony_entry):
+    parts = {}
+    for part_key, part in harmony_entry['parts'].items():
+        metrics = vocal_density.calc_vocal_metrics(part['notes'], part['talkie'], part.get('percussion'))
+        if metrics is not None:
+            parts[part_key] = {'metrics': metrics, 'd': calc_vocal_d(metrics)}
+    if not parts:
+        return None
+
+    hardest = max(parts, key=lambda key: parts[key]['d']['D'])
+    d = parts[hardest]['d']
+    return {
+        'parts': parts,
+        'hardest': hardest,
+        'D': d['D'],
+        'RemapDiff': d['RemapDiff'],
+        'CalcTier': d['CalcTier'],
     }

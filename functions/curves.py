@@ -9,6 +9,8 @@ Drums: d_raw sums hps+tps+kps, fits on scale naturally
 
 Vocals: d_raw = (pps*R) + sps, scale is okay / percussion is almost always low
 
+Harmonies: each part gets its own vocal curves, the harmony ~D is the hardest part's d_raw
+
 d_raw lines don't apply COV/STAM since those are song-level balancing values
 
 Each calc_*_curves accepts the density module's window_arrays() output (windows=)
@@ -184,3 +186,44 @@ def calc_vocal_curves(notes, talkie, percussion=None,
         'd_raw': difficulty['R'] * smoothed['pps'] + smoothed['sps'],
         'has_perc': has_perc,
     }
+
+# ---------------
+# Harmonies curves
+# ---------------
+
+# harmonies entry + calc_harmony_d() output -> every part's vocal curves, plus the ~D backdrop
+def calc_harmony_curves(harmony_entry, harmony, step_ms=vocal_density.STEP_MS, tau_ms=TAU_MS):
+    parts = {}
+    for part_key, part in harmony_entry['parts'].items():
+        result = harmony['parts'].get(part_key)
+        if result is None:
+            continue
+        part_curves = calc_vocal_curves(part['notes'], part['talkie'], part.get('percussion'),
+                                        step_ms=step_ms, tau_ms=tau_ms, difficulty=result['d'])
+        if part_curves is not None:
+            parts[part_key] = part_curves
+    if not parts:
+        return None
+
+    n = max(c['time_ms'].size for c in parts.values())
+    hardest = harmony['hardest'] if harmony['hardest'] in parts else next(iter(parts))
+    return {
+        'time_ms': windowing.make_grid(n, step_ms),
+        'parts': parts,
+        'd_raw': parts[hardest]['d_raw'],
+        'hardest': hardest,
+    }
+
+
+# pads every curve array for stacked render
+def pad_curves(curves, n, step_ms=vocal_density.STEP_MS):
+    if curves is None:
+        return None
+    out = dict(curves)
+    for key in ('pps', 'sps', 'perc', 'd_raw'):
+        if out.get(key) is not None:
+            out[key] = _pad_to_length(out[key], n)
+    if 'parts' in out:
+        out['parts'] = {k: pad_curves(v, n, step_ms) for k, v in out['parts'].items()}
+    out['time_ms'] = windowing.make_grid(n, step_ms)
+    return out

@@ -212,7 +212,7 @@ Nothing here has any memory of what came before. Every axis is a per hit or per 
 
 ## Vocal Definitions
 
-Vocals use the same windowing idea (a 1-second window swept in 250ms steps, deliberately including rests), but there are no frets or lanes, and no EMHX levels - the games only ever have one lead vocal line (although some engines differ in strictness by level), so everything is treated as Expert. Only `PART VOCALS` from the .mid is read (.chart can't encode vocals, and harmonies aren't parsed).
+Vocals use the same windowing idea (a 1-second window swept in 250ms steps, deliberately including rests), but there are no frets or lanes, and no EMHX levels - the games only ever have one lead vocal line (although some engines differ in strictness by level), so everything is treated as Expert. `PART VOCALS` from the .mid is the lead line (.chart can't encode vocals), `HARM1`-`HARM3` are read separately for harmonies but scored similarly (hardest harmony is used for D/tiering).
 
 The vocal track is split into three streams:
 - **Sung notes** - pitched notes, including slides (`+`) and placeholders (`+$`)
@@ -322,13 +322,12 @@ The only vocals-specific constant is middle C (60) - everything else is shared w
 
 ### What's missing <!-- omit in toc -->
 
-A lot of what makes vocals hard is familiarity with the song, lyrical awkwardness, obscured or strange vocal processing, and other things that just can't be picked up from midi note data.
-
+A lot of what makes vocals hard is familiarity with the song, lyrical awkwardness, obscured or strange vocal processing, and other things that just can't be picked up from midi note data. <!-- omit in toc -->
 ---
 
 ## Binning Methodology
 
-Reference for the calibration tables behind `fret_formula.py`, `drum_formula.py`, and `vocal_formula.py`.
+Reference for the calibration tables behind `fret_formula.py`, `drum_formula.py`, and `vocal_formula.py`. Harmonies use the vocal tables, but tiering is based on the hardest line from HARM1, HARM2, or HARM3 since they are combined in game.
 
 ### RemapDiff (0-6) Calibration <!-- omit in toc -->
 

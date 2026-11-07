@@ -12,6 +12,10 @@ Drums: Hands/Travel/Kicks/D share an axis, D = Hands + Travel + Kicks
 Vocals: Pitch/Syllables/D share an axis, D approximated by R*Pitch + Syllables
     - Pitch reuses the VPS color, Syllables reuses the NPS color, Percussion reuses Kick's color
     - Percussion is render-only (not part of D) and only drawn when the chart actually has any
+    - a song with Harmonies stacks a Harmonies chart under the Lead, whichever code (V or H) is rendered
+        > Harmonies ~D = the hardest part's curve
+        > H1-H3 D curves
+        > both charts share one y-scale
 
 Light/dark themes can be set in config
 
@@ -45,6 +49,15 @@ KICK_MODE_LABELS = {
     '1x': '1x (single pedal)',
     '2x': '2x (double pedal)',
 }
+
+# harmony part line colors, overridable in config
+HARMONY_PART_COLORS = {
+    'harm1': '#FF4FA0',
+    'harm2': '#3FD9D0',
+    'harm3': '#F2D13A',
+}
+
+HARMONY_LINESTYLE = '--'
 
 # primary font + fallbacks for glyphs it doesn't have (Japanese/Chinese/Korean titles)
 # only installed fonts are used, so missing ones never trigger 'font not found' warnings
@@ -193,22 +206,21 @@ def _new_figure(profile, n_rows=1, height=None):
     return fig, ([axes] if n_rows == 1 else list(axes))
 
 
-# D as a filled backdrop + dotted component lines, then the shared axis styling
-# lines: [(values, profile color key, legend label), ...]
+# D filled + component lines + shared axis styling
 def _style_axes(ax, time_s, profile, d_curve, lines, show_xlabel=True):
     ax.set_facecolor(profile['axes_bg'])
 
-    # D: filled backdrop
+    # D
     ax.plot(time_s, d_curve, color=profile['color_d'],
             linewidth=profile['linewidth'], zorder=3, label='~D')
     if profile.get('fill_curves'):
         ax.fill_between(time_s, d_curve, color=profile['color_d'],
                         alpha=profile['fill_alpha'], linewidth=0, zorder=2)
 
-    # components: dotted lines
-    for values, color_key, label in lines:
-        ax.plot(time_s, values, color=profile[color_key],
-                linewidth=profile['linewidth'], linestyle=':', zorder=3, label=label)
+    # line styling
+    for values, color_key, label, *style in lines:
+        ax.plot(time_s, values, color=profile.get(color_key, color_key),
+                linewidth=profile['linewidth'], linestyle=style[0] if style else ':', zorder=3, label=label)
 
     ax.set_ylabel('per second', fontsize=profile['label_size'], color=profile['text_color'])
     ax.tick_params(labelsize=profile['tick_size'], colors=profile['text_color'])
@@ -233,7 +245,13 @@ def _legend(ax, profile, ncol, handles=None, labels=None):
               fontsize=profile['tick_size'], labelcolor=profile['text_color'], **extra)
 
 
-# Header - title row, metadata row under (parse_math off: '$' in names prints as-is)
+# small top-right tag inside an axes (drum 1x/2x, vocal Lead/Harmonies)
+def _axes_tag(ax, text, profile):
+    ax.text(0.995, 0.96, text, transform=ax.transAxes, ha='right', va='top',
+            fontsize=profile['tick_size'], color=profile['muted_text_color'], parse_math=False)
+
+
+# Header - title row, metadata row under
 def _draw_header(ax, entry, difficulty, original_diff, profile):
     meta = entry.get('meta', {})
     title = (f"{_ellipsize(meta.get('Name', 'unk'), TITLE_LIMIT)}"
@@ -284,26 +302,78 @@ def render_song(entry, curves, difficulty=None, original_diff=None, profile=None
         _draw_header(ax, entry, difficulty, original_diff, profile)
         return _save(fig, entry, out_dir)
 
-# render one vocals song - Pitch / Syllables (+ Percussion when charted)
-def render_vocal_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):
-    profile = resolve_profile(profile)
-    out_dir = resolve_out_dir(out_dir)
-    has_perc = curves.get('has_perc', False)
 
+# vocal lines for one lead panel - Pitch / Syllables (+ Percussion when charted)
+def _vocal_lines(curves):
     lines = [
         (curves['pps'], 'color_vps', 'Pitch'),
         (curves['sps'], 'color_nps', 'Syllables'),
     ]
-    # Percussion: only drawn when the chart actually has any
-    if has_perc:
+    if curves.get('has_perc'):
         lines.append((curves['perc'], 'color_kps', 'Percussion'))
+    return lines
+
+
+# harmony part lines, each part's ~D as a dashed line
+def _harmony_lines(harmony_curves, profile):
+    lines = []
+    for part_key, label in instruments.HARMONY_PART_LABELS.items():
+        part = harmony_curves['parts'].get(part_key)
+        if part is not None:
+            color = profile.get(f'color_{label.lower()}', HARMONY_PART_COLORS[part_key])
+            lines.append((part['d_raw'], color, label, HARMONY_LINESTYLE))
+    return lines
+
+
+# render one vocals song, Pitch / Syllables (+ Percussion when charted)
+# harmony_curves stacks a Harmonies chart under the Lead
+def render_vocal_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None,
+                      harmony_curves=None, panel_labels=None):
+    profile = resolve_profile(profile)
+    out_dir = resolve_out_dir(out_dir)
+    panel_labels = panel_labels or {}
+
+    if harmony_curves is None:
+        has_perc = curves.get('has_perc', False)
+        with _render_context():
+            fig, (ax,) = _new_figure(profile)
+            _style_axes(ax, _time_seconds(curves), profile, curves['d_raw'], _vocal_lines(curves))
+            _legend(ax, profile, ncol=4 if has_perc else 3)
+            _draw_header(ax, entry, difficulty, original_diff, profile)
+            return _save(fig, entry, out_dir)
+
+    # stacked: Lead over Harmonies, like drums 2x
+    panels = []
+    if curves is not None:
+        panels.append((curves, curves['d_raw'], _vocal_lines(curves), panel_labels.get('lead', 'Lead')))
+    panels.append((harmony_curves, harmony_curves['d_raw'], _harmony_lines(harmony_curves, profile),
+                   panel_labels.get('harmony', 'Harmonies')))
+
+    base_height = tuple(profile['figsize'])[1]
+    fig_height = base_height * 1.9 if len(panels) > 1 else base_height
 
     with _render_context():
-        fig, (ax,) = _new_figure(profile)
-        _style_axes(ax, _time_seconds(curves), profile, curves['d_raw'], lines)
-        _legend(ax, profile, ncol=4 if has_perc else 3)
-        _draw_header(ax, entry, difficulty, original_diff, profile)
-        return _save(fig, entry, out_dir)
+        fig, axes = _new_figure(profile, n_rows=len(panels), height=fig_height)
+        for i, (ax, (panel_curves, d_curve, lines, tag)) in enumerate(zip(axes, panels)):
+            _style_axes(ax, _time_seconds(panel_curves), profile, d_curve, lines,
+                        show_xlabel=i == len(panels) - 1)
+            _axes_tag(ax, tag, profile)
+
+        top = max(ax.get_ylim()[1] for ax in axes)
+        for ax in axes:
+            ax.set_ylim(0, top)
+
+        # one legend below the bottom chart
+        handles, labels = [], []
+        for ax in axes:
+            for handle, label in zip(*ax.get_legend_handles_labels()):
+                if label not in labels:
+                    handles.append(handle)
+                    labels.append(label)
+        _legend(axes[-1], profile, ncol=len(labels), handles=handles, labels=labels)
+        _draw_header(axes[0], entry, difficulty, original_diff, profile)
+        return _save(fig, entry, out_dir, bottom_margin=0.06 * (base_height / fig_height))
+
 
 # render one drums song - Hands / Travel / Kicks, 2x stacked under 1x when charted
 def render_drum_song(entry, curves, difficulty=None, original_diff=None, profile=None, out_dir=None):

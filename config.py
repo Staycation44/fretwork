@@ -38,7 +38,7 @@ XLSX_LEVELS = "ALL"
 
 # This controls whether the spreadsheet includes the extra metrics (VPS/NPS subtypes, N, V, COV)
 # default is false, just producing D, Remap, CalcTier, True to add extra hidden columns for diagnostics
-EXTRA_METRICS = False 
+EXTRA_METRICS = False
 
 
 # ------------------------
@@ -63,7 +63,7 @@ DIFF_WRITE_MODE = None # None | "CalcTier" | "RemapDiff" | "Restore"
 #   - applies even when DIFF_WRITE_MODE is None - only the instruments listed here are written
 #   - ignored when DIFF_WRITE_MODE is "Restore" (Restore always covers every instrument)
 #   - "Restore" isn't a valid override, and unknown instrument keys stop ANALYZE before it starts
-# instrument keys: guitar, coop, rhythm, bass, keys, drums, vocals, band
+# instrument keys: guitar, coop, rhythm, bass, keys, drums, vocals, harmonies, band
 DIFF_WRITE_OVERRIDES = {} # {instrument_key: "CalcTier" | "RemapDiff" | None}
 
 '''
@@ -78,6 +78,7 @@ DIFF_WRITE_OVERRIDES = {
     "keys":     None,          # skip - keys song.ini left untouched
     "drums":   "RemapDiff",    # override to the 0-6 remap instead
     "band":     None,          # skip - band song.ini left untouched
+    "harmonies": "RemapDiff",  # override to the 0-6 remap instead
 
     "vocals" not in overrides means it will fall back to DIFF_WRITE_MODE
 }
@@ -121,6 +122,10 @@ RENDER_DEFAULT = {
     "color_nps": "#127BC1", # Notes for 5 fret / Hands for drums / Syllables for vocals
     "color_vps": "#DD6C1B", # Variability for 5 fret / Travel for drums / Pitch for vocals
     "color_kps": "#2E9E5B", # Kicks for drums / Percussion for vocals
+    
+    "color_h1": "#FF4FA0",  # HARM 1
+    "color_h2": "#3FD9D0",  # HARM 2
+    "color_h3": "#F2D13A",  # HARM 3
 
     "linewidth": 1.5,
     "grid_alpha": 0.25,
