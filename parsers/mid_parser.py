@@ -24,33 +24,37 @@ MID_PARSER - Parses notes.mid files into per-instrument, per-level note streams:
             'kick_mask': {'time_ms': np.ndarray, 'lanes': np.ndarray uint8},
         }
 
-Scope: Easy/Medium/Hard/Expert (EMHX). 5-fret (Guitar/Co-op/Rhythm/Bass/Keys) + Drums + Vocals
-PART VOCALS is handed to vocal_parser.extract_vocal_track (Expert only, see vocal_parser)
+Scope: Easy/Medium/Hard/Expert (EMHX). 5-fret (Guitar/Co-op/Rhythm/Bass/Keys) + Drums + Vocals/Harmonies
+
 
 Tempo: zero/invalid set_tempo messages are skipped and logged to the build errors CSV,
 and 120 BPM is assumed before the first tempo marker (see timing.clean_tempos)
 
-NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
-NOT PARSED: star power and solo phrases, and GH1/2-style legacy open notes (pitch 0 on a specific channel)
-
-Only note_on is read (besides vocals) - note_off/velocity-0 messages are ignored, since note length isn't used by any metric.
-
 REPAIR: a file mido can't read is rewritten by mid_repair.py and read again, with a MidiRepaired build warning
-A file with running status straight after a SysEx is repaired before mido reads it since mido can misread that without raising 
-
-SYSEX OPEN NOTES: Phase Shift SysEx open phrases (0x01) are read the way YARG.Core and Moonscraper do
+A file with running status straight after a SysEx is repaired before mido reads it since mido can misread that without raising
 
 ===5 FRET===
 .mid encodes level as a pitch block within one track per instrument
 lane N (0-4, GRBYO) sits at MID_PITCH_BASE[level] + N, open sits at MID_PITCH_BASE[level] - 1
 A single linear scan of the track buckets each note_on into the right level by pitch
 
-Note-based open notes (pitch == MID_PITCH_BASE[level] - 1) require an [ENHANCED_OPENS] text event
+ENHANCED OPENS: Note-based open notes (pitch == MID_PITCH_BASE[level] - 1) require an [ENHANCED_OPENS] text event
+SYSEX OPEN NOTES: Phase Shift SysEx open phrases (0x01) are read the way YARG.Core and Moonscraper do
+
+NOTE STATE IS NOT PARSED - strum/tap/hopo are not used in the calcs and are discarded
+NOT PARSED: star power and solo phrases, and GH1/2-style legacy open notes (pitch 0 on a specific channel)
+
+Only note_on is read (besides vocals) - note_off/velocity-0 messages are ignored, since note length isn't used by any metric.
 
 ===DRUMS===
 Same level MID_PITCH_BASE blocks and parsing scan, 2 note streams (hand/kick)
 Hand lane N (4 or 5 lane) = base + n (1-5)
 Kick lane 1x base, kick lane 2x = base - 1 (expert only)
+
+===VOX===
+PART VOCALS is handed to vocal_parser.extract_vocal_track (Expert only, no EMH for vox)
+HARM1-3 are handed together to vocal_parser.extract_harmonies (2+ parts needed)
+A placeholder harmony chart (vocal_parser.sparse_harmony) is dropped with a SparseHarmonies build warning
 """
 
 import io
@@ -356,6 +360,13 @@ def mid_notes_from_bytes(data, song_path, warn_label=None):
     instruments_out = {}
     roll_spans_out = {}
     for instrument_key in instruments.INSTRUMENT_KEYS:
+        # HARM1-HARM3, found by part
+        if instrument_key == 'harmonies':
+            levels = vocal_parser.extract_harmonies(track_map, to_ms_array)
+            if levels is not None:
+                instruments_out[instrument_key] = levels
+            continue
+
         track = None
         for name in instruments.MID_TRACK_NAMES[instrument_key]:
             if name in track_map:
@@ -376,6 +387,13 @@ def mid_notes_from_bytes(data, song_path, warn_label=None):
                 spans = _extract_roll_spans(track, to_ms_array)
                 if spans:
                     roll_spans_out['drums'] = spans
+
+    # minimal/incomplete harmonies charts are dropped
+    if 'harmonies' in instruments_out:
+        reason = vocal_parser.sparse_harmony(instruments_out['harmonies'], instruments_out.get('vocals'))
+        if reason:
+            del instruments_out['harmonies']
+            warn('SparseHarmonies', reason)
 
     if not instruments_out:
         raise ValueError(

@@ -158,6 +158,26 @@ def _vocal_row(code, meta, vocal_entry, metrics=None, d=None):
     }
 
 
+# One harmonies row
+# hardest part (the part the harmony D is), plus every part's own D (D_H1-D_H3)
+# NoteCount is syllables across all parts, DurationS is the longest part
+def _harmony_row(code, meta, harmony):
+    hardest = harmony['parts'][harmony['hardest']]
+    part_ds = {
+        f'D_{label}': harmony['parts'][part_key]['d']['D'] if part_key in harmony['parts'] else None
+        for part_key, label in instruments.HARMONY_PART_LABELS.items()
+    }
+    return {
+        'Code': code,
+        **_row_meta(meta, 'harmonies', 'expert'),
+        **hardest['metrics'],
+        **hardest['d'],
+        'NoteCount': sum(part['metrics']['NoteCount'] for part in harmony['parts'].values()),
+        'DurationS': int(max(part['metrics']['DurationS'] for part in harmony['parts'].values())),
+        **part_ds,
+    }
+
+
 # One Band row per song. placements_by_instrument: {instrument_key: {'RemapDiff', 'CalcTier'}}, from difficulties_by_instrument
 # no row for single insturment songs / non-core band combos
 def _band_row(meta, charted_instruments, placements_by_instrument):
@@ -225,10 +245,24 @@ def _vocal_family(song, instrument_key, levels):
     return remap, tier, build_row
 
 
+# Harmonies are Expert only so D, RemapDiff, and CalcTier are the hardest part's, using the vocal bins
+def _harmony_family(song, instrument_key, levels):
+    expert = levels.get('expert')
+    harmony = vocal_formula.calc_harmony_d(expert) if expert is not None else None
+    remap, tier = (harmony['RemapDiff'], harmony['CalcTier']) if harmony is not None else (None, None)
+
+    def build_row(code, level_key, entry):
+        if level_key != 'expert' or harmony is None:
+            return None
+        return _harmony_row(code, song['meta'], harmony)
+    return remap, tier, build_row
+
+
 # anything not listed is 5 fret
 FAMILIES = {
     'drums': _drum_family,
     'vocals': _vocal_family,
+    'harmonies': _harmony_family,
 }
 
 
@@ -491,11 +525,11 @@ def _write_workbook(xlsx_out, sheet_rows, total_rows, frames):
 
                 # EXTRA_METRICS = False drops the hidden diagnostic columns
                 column_order = _column_order_for(sheet_name)
-                df = df[column_order]
+                df = df.reindex(columns=column_order)
 
                 # rounding reads the same per-sheet float-column (X.XX formatting)
                 float_cols = [c for c in df.columns if c in profile.float_cols or c == profile.sort_col]
-                df[float_cols] = df[float_cols].round(2)
+                df[float_cols] = df[float_cols].apply(pd.to_numeric, errors='coerce').round(2)
                 df = df.sort_values(profile.sort_col, ascending=False)
 
                 sheet = sheet_name[:31]  # Excel sheet-name limit

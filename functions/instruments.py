@@ -26,24 +26,27 @@ DRUMS
 - splitting note streams out to have hands and kick separated
 - 1x & 2x columns/suffix conventions to support both for one song row
 
-VOCALS
+VOCALS/HARMONIES
 - splitting note streams into Pitch / Talkies / Percussion
 - No levels (everything treated as Expert)
+- HARM1-3 parsed into one 'harmonies' entry (combined in game and for diff tag tiering)
+- Shares the Vocals sheet: split Lead / Harmonies, code letters V / H
 """
 
 from collections import namedtuple
 
 # instrument keys, display/iteration order
-INSTRUMENT_KEYS = ['guitar', 'coop', 'rhythm', 'bass', 'keys', 'drums', 'vocals']
+INSTRUMENT_KEYS = ['guitar', 'coop', 'rhythm', 'bass', 'keys', 'drums', 'vocals', 'harmonies']
 
 DISPLAY_NAMES = {
-    'guitar': 'Guitar',
-    'coop':   'Co-op Guitar',
-    'rhythm': 'Rhythm Guitar',
-    'bass':   'Bass',
-    'keys':   'Keys',
-    'drums':  'Drums',
-    'vocals': 'Vocals',
+    'guitar':    'Guitar',
+    'coop':      'Co-op Guitar',
+    'rhythm':    'Rhythm Guitar',
+    'bass':      'Bass',
+    'keys':      'Keys',
+    'drums':     'Drums',
+    'vocals':    'Vocals',
+    'harmonies': 'Harmonies',
 }
 
 # level keys, display/iteration order
@@ -60,14 +63,25 @@ LEVEL_DISPLAY_NAMES = {
 
 # .mid track name(s) per instrument, unaffected by level (pitch blocks)
 # Guitar carries the GH1-era 'T1 GEMS' legacy fallback
+# Harmonies span three tracks, see HARMONY_TRACK_NAMES below
 MID_TRACK_NAMES = {
-    'guitar': ['PART GUITAR', 'T1 GEMS'],
-    'coop':   ['PART GUITAR COOP'],
-    'rhythm': ['PART RHYTHM'],
-    'bass':   ['PART BASS'],
-    'keys':   ['PART KEYS'],
-    'drums':  ['PART DRUMS'],
-    'vocals': ['PART VOCALS'],
+    'guitar':    ['PART GUITAR', 'T1 GEMS'],
+    'coop':      ['PART GUITAR COOP'],
+    'rhythm':    ['PART RHYTHM'],
+    'bass':      ['PART BASS'],
+    'keys':      ['PART KEYS'],
+    'drums':     ['PART DRUMS'],
+    'vocals':    ['PART VOCALS'],
+    'harmonies': [],
+}
+
+# harmony part key -> .mid track name(s), first found wins
+# 'PART HARMn' is the alternative naming listed in TheNathannator's docs (RBN2 template default)
+HARMONY_PARTS = ['harm1', 'harm2', 'harm3']
+HARMONY_TRACK_NAMES = {
+    'harm1': ['HARM1', 'PART HARM1'],
+    'harm2': ['HARM2', 'PART HARM2'],
+    'harm3': ['HARM3', 'PART HARM3'],
 }
 
 # .mid pitch block base per level, per TheNathannator's 5-Fret Guitar mid docs:
@@ -87,13 +101,14 @@ MID_PITCH_BASE = {
 # .chart section base name per instrument (level prefix stripped) -
 # Bass carries the 'SingleBass' legacy fallback, checked after 'DoubleBass' at every level
 CHART_BASE_SECTIONS = {
-    'guitar': ['Single'],
-    'coop':   ['DoubleGuitar'],
-    'rhythm': ['DoubleRhythm'],
-    'bass':   ['DoubleBass', 'SingleBass'],
-    'keys':   ['Keyboard'],
-    'drums':  ['Drums'],
-    'vocals': [],  # .chart has no vocals - required to prevent errors
+    'guitar':    ['Single'],
+    'coop':      ['DoubleGuitar'],
+    'rhythm':    ['DoubleRhythm'],
+    'bass':      ['DoubleBass', 'SingleBass'],
+    'keys':      ['Keyboard'],
+    'drums':     ['Drums'],
+    'vocals':    [],  # .chart has no vocals - required to prevent errors
+    'harmonies': [],  # same
 }
 
 # CHART_SECTIONS[instrument_key][level_key] -> ordered list of section names to try,
@@ -110,26 +125,31 @@ CHART_SECTIONS = {
 # song.ini Difficulty tag per instrument - Expert-referenced only
 # song.ini has no level based tag so assuming the Expert tiering as canonical
 # RemapDiff/CalcTier reuse this against the Expert row's D for E/M/H tier display + write/restore
+
+# ORDER MATTERS: this order is the backup CSV column order
+# ini_updater.migrate_backup_header can only append new columns at the end
 DIFF_TAGS = {
-    'guitar': 'diff_guitar',
-    'coop':   'diff_guitar_coop',
-    'rhythm': 'diff_rhythm',
-    'bass':   'diff_bass',
-    'keys':   'diff_keys',
-    'drums':  'diff_drums',
-    'vocals': 'diff_vocals',
-    'band':   'diff_band',
+    'guitar':    'diff_guitar',
+    'coop':      'diff_guitar_coop',
+    'rhythm':    'diff_rhythm',
+    'bass':      'diff_bass',
+    'keys':      'diff_keys',
+    'drums':     'diff_drums',
+    'vocals':    'diff_vocals',
+    'band':      'diff_band',
+    'harmonies': 'diff_vocals_harm',
 }
 
-# instrument suffix for retrieval code,
+# instrument suffix for retrieval code
 CODE_SUFFIX = {
-    'guitar': 'G',
-    'coop':   'C',
-    'rhythm': 'R',
-    'bass':   'B',
-    'keys':   'K',
-    'drums':  'D',
-    'vocals': 'V',
+    'guitar':    'G',
+    'coop':      'C',
+    'rhythm':    'R',
+    'bass':      'B',
+    'keys':      'K',
+    'drums':     'D',
+    'vocals':    'V',
+    'harmonies': 'H',
 }
 
 SUFFIX_TO_INSTRUMENT = {suffix: key for key, suffix in CODE_SUFFIX.items()}
@@ -159,12 +179,13 @@ SUPPORTS_OPEN_NOTES = {
 
 # analyze.py xlsx tab grouping by instrument
 # EMHX is a filterable column within each tab not a separate tab
+# Lead vocals + harmonies share the Vocals tab, split by Type (Lead / Harmonies)
 SHEET_GROUPS = {
     'Guitar': ['guitar', 'coop', 'rhythm'],
     'Bass':   ['bass'],
     'Keys':   ['keys'],
     'Drums':  ['drums'],
-    'Vocals': ['vocals'],
+    'Vocals': ['vocals', 'harmonies'],
     'Band':   ['band'],
 }
 
@@ -230,20 +251,27 @@ DRUM_HIDDEN_COLS = list(DRUM_DIAG_COLS)
 DRUM_SCALED_COLS = ['D_1x', 'D_2x', 'RemapDiff', 'CalcTier']
 
 # Vocals: headline metadata + D, plus the diagnostic breakdown
-# talkieFrac is descriptive only, not fed into the formula
+# Harmonies rows fill VOCAL_DIAG_COLS from the hardest part
+# HARMONY_DIAG_COLS - every part's own D
 VOCAL_DIAG_COLS = [
     'Pitches', 'maxPitch', 'talkieFrac',
     'pPPS', 'aPPS', 'medPPS', 'stdPPS',
     'pSPS', 'aSPS', 'medSPS', 'stdSPS',
     'P', 'R', 'S', 'CoV', 'STAM',
 ]
+
+# per-part harmony D, labelled H1-H3
+HARMONY_PART_LABELS = {'harm1': 'H1', 'harm2': 'H2', 'harm3': 'H3'}
+HARMONY_DIAG_COLS = ['D_H1', 'D_H2', 'D_H3']
+
 VOCAL_COLUMN_ORDER = [
     'Code', 'Song Title', 'Artist', 'Type', 'Charter', 'Release', 'Official',
     'NoteCount', 'DurationS', 'Difficulty', 'D', 'RemapDiff', 'CalcTier',
     *VOCAL_DIAG_COLS,
+    *HARMONY_DIAG_COLS,
 ]
-VOCAL_HIDDEN_COLS = list(VOCAL_DIAG_COLS)
-VOCAL_FLOAT_COLS = {*VOCAL_DIAG_COLS, 'D'} - {'Pitches', 'maxPitch'}
+VOCAL_HIDDEN_COLS = [*VOCAL_DIAG_COLS, *HARMONY_DIAG_COLS]
+VOCAL_FLOAT_COLS = {*VOCAL_DIAG_COLS, *HARMONY_DIAG_COLS, 'D'} - {'Pitches', 'maxPitch'}
 VOCAL_SCALED_COLS = ['D', 'RemapDiff', 'CalcTier']
 
 # Band: one row per song
@@ -273,13 +301,14 @@ assert SHEET_PROFILES.keys() == SHEET_GROUPS.keys(), "SHEET_PROFILES and SHEET_G
 
 # per-row label for 'Type' column
 TYPE_LABELS = {
-    'guitar': 'Lead',
-    'coop':   'Co-op',
-    'rhythm': 'Rhythm',
-    'bass':   'Bass',
-    'keys':   'Keys',
-    'drums':  'Drums',
-    'vocals': 'Vocals',
+    'guitar':    'Lead',
+    'coop':      'Co-op',
+    'rhythm':    'Rhythm',
+    'bass':      'Bass',
+    'keys':      'Keys',
+    'drums':     'Drums',
+    'vocals':    'Lead',
+    'harmonies': 'Harmonies',
 }
 
 

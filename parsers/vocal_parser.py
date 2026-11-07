@@ -1,5 +1,5 @@
 """
-VOCAL_PARSER - Extracts PART VOCALS into note/talkie/percussion streams for the cache
+VOCAL_PARSER - Extracts PART VOCALS (& HARM1-HARM3) into note/talkie/percussion streams for the cache
 
 extract_vocal_track(track, to_ms_array) returns
     {'expert': {'notes': {...}, 'talkie': {...}, 'percussion': {...}}}
@@ -19,7 +19,7 @@ THREE SEPARATE STREAMS:
 
     'percussion' - note 96 taps: time_ms / end_ms
 
-Lyric checks ignore trailing join/format marks ('-', '=', '/', '%')
+Lyric checks ignore trailing join/format marks ('-', '=', '/', '%') and the hidden-lyric mark ('$')
 Lyrics are read from lyric meta events, falling back to non-bracketed text events when the track has none
 
 Sung notes + talkies are the note count and feed D
@@ -31,6 +31,8 @@ Discarded: 0/1 range-shift, 97 non-playable percussion, 105 phrase markers, 106 
 
 import numpy as np
 
+from functions import instruments
+
 PITCH_LOW, PITCH_HIGH = 36, 84
 PERC_PLAYABLE = 96
 
@@ -41,6 +43,13 @@ SLIDE_LYRIC = '+'
 # trailing marks that format syllables
 LYRIC_FORMAT_MARKS = '-=/%'
 
+# hidden-lyric mark (HARM2/HARM3) - stripped after the placeholder check
+HIDDEN_MARK = '$'
+
+# sparse harmony guard - see sparse_harmony()
+HARMONY_MIN_SHARE = 0.10      # busiest part vs lead syllables
+HARMONY_MIN_SYLLABLES = 10    # fallback when there's no PART VOCALS to compare against
+
 # Used to cut off notes that are left on at track end (defensive)
 TRACK_END_CLOSE_MS = 500.0
 
@@ -49,9 +58,14 @@ def _is_kept(note):
     return PITCH_LOW <= note <= PITCH_HIGH or note == PERC_PLAYABLE
 
 
-# lyric with format marks removed
+# lyric with format marks removed - '+$' placeholder kept whole, otherwise '$' stripped too
 def _lyric_base(text):
-    return None if text is None else text.rstrip(LYRIC_FORMAT_MARKS)
+    if text is None:
+        return None
+    base = text.rstrip(LYRIC_FORMAT_MARKS)
+    if base == PLACEHOLDER_LYRIC:
+        return base
+    return text.rstrip(LYRIC_FORMAT_MARKS + HIDDEN_MARK)
 
 
 def extract_vocal_track(track, to_ms_array):
@@ -168,3 +182,48 @@ def extract_vocal_track(track, to_ms_array):
             },
         }
     }
+
+
+# ----------
+# HARMONIES
+# ----------
+
+# {track name: mido track} -> harmonies cache entry or None
+def extract_harmonies(track_map, to_ms_array):
+    parts = {}
+    for part_key in instruments.HARMONY_PARTS:
+        track = next((track_map[name] for name in instruments.HARMONY_TRACK_NAMES[part_key]
+                      if name in track_map), None)
+        if track is None:
+            continue
+        extracted = extract_vocal_track(track, to_ms_array)
+        if extracted is not None:
+            parts[part_key] = extracted['expert']
+
+    if len(parts) < 2:
+        return None
+    return {'expert': {'parts': parts}}
+
+
+# syllables in one vocal-shaped entry - new sung syllables (not slides/placeholders) + talkies
+# same definition as vocal_density's NoteCount
+def syllable_count(entry):
+    notes = entry['notes']
+    new_syllables = ~(np.asarray(notes['is_slide'], dtype=bool) | np.asarray(notes['is_placeholder'], dtype=bool))
+    return int(new_syllables.sum()) + int(len(entry['talkie']['time_ms']))
+
+
+# reason string when the harmony chart is a placeholder next to the lead (see module docstring), else None
+def sparse_harmony(harmony_levels, vocal_levels=None):
+    parts = harmony_levels['expert']['parts']
+    busiest = max(syllable_count(part) for part in parts.values())
+    lead = (vocal_levels or {}).get('expert')
+    if lead is not None:
+        lead_syllables = syllable_count(lead)
+        if lead_syllables and busiest < HARMONY_MIN_SHARE * lead_syllables:
+            return (f"harmony parts dropped as placeholders - busiest part has {busiest} syllables "
+                    f"vs {lead_syllables} in PART VOCALS")
+        return None
+    if busiest < HARMONY_MIN_SYLLABLES:
+        return f"harmony parts dropped as placeholders - busiest part has {busiest} syllables"
+    return None
