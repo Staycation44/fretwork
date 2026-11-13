@@ -158,6 +158,7 @@ Graphs are available in light or dark mode depending on the config.
 ## 5. Extension Ideas
 
 **Extension Ideas:**
+- .sng / rb3con diff writeback
 - Pro Instruments
 - Scoring by totals (as opposed to average), type of notes (singles by type/state, chords by type)
 - D by section + Section names for renders
